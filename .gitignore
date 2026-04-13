@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Credentials — never commit these
+.claude/rules/supabase.env
+.claude/settings.local.json
+
+# Machine-specific symlinks (point to local Obsidian vault path)
+.claude/skills
+
+# Supabase local dev artifacts
+supabase/.temp/
