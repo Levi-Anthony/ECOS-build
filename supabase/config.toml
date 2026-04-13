@@ -1,4 +1,10 @@
 
+[functions.brain-middleware]
+enabled = true
+verify_jwt = false
+import_map = "./functions/brain-middleware/deno.json"
+entrypoint = "./functions/brain-middleware/index.ts"
+
 [functions.ingest-thought]
 enabled = true
 verify_jwt = true
