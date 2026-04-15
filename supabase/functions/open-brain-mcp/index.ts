@@ -34,6 +34,7 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 async function extractMetadata(text: string): Promise<Record<string, unknown>> {
+  try {
   const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
     method: "POST",
     headers: {
@@ -46,23 +47,39 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
       messages: [
         {
           role: "system",
-          content: `Extract metadata from the user's captured thought. Return JSON with:
+          content: `You are processing a captured thought for storage in a semantic memory system. Complete two tasks and return a single JSON object.
+
+TASK 1 — Self-containment rewrite:
+Rewrite the content to stand alone when retrieved cold with no conversation context. Remove or replace session-specific references ("in this session," "as discussed," "earlier," "the above," etc.) by substituting the actual referent. If no session references exist, return the content unchanged. Preserve all meaning. Do not summarize.
+
+TASK 2 — Metadata extraction from the rewritten content:
+- "rewritten_content": the self-contained version from Task 1 (required)
+- "needs_split": true if this entry requires two distinct concept-labels to fully describe its content — i.e., it sits at the intersection of two semantic neighborhoods rather than at the center of one. Close relationship between the concepts is NOT a reason to omit this flag; closely-related but distinct mechanisms or claims are still two separate centers of mass. false only if one concept-label covers the entire entry.
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
-- "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
+- "dates_mentioned": array of dates as YYYY-MM-DD (empty if none)
 - "topics": array of 1-3 short topic tags (always at least one)
 - "type": one of "observation", "task", "idea", "reference", "person_note"
-Only extract what's explicitly there.`,
+- "domain": one of "ecos-architecture", "tango-pedagogy", "ttc-board", "neil-outreach", "it-consulting", "music-production", "brain-protocol", "personal" — choose the single best-fit domain
+- "horizon": one of "immediate" (time-sensitive, actionable now), "project" (relevant to an active project, not urgent), "evergreen" (durable reference or principle)
+- "signal_type": one of "taste" (aesthetic preference or style constraint), "voice" (tone, phrasing, communication style), "struct" (structural pattern or architecture), "decision" (committed choice or resolution), "framework" (conceptual model or heuristic), "content" (factual or narrative content)
+- "confidence": one of "observed" (directly witnessed or stated), "inferred" (reasoned from evidence), "hypothetical" (speculative or conditional)
+
+Return only the JSON object.`,
         },
         { role: "user", content: text },
       ],
     }),
   });
+  if (!r.ok) return { topics: ["uncategorized"], type: "observation", _fallback: true };
   const d = await r.json();
   try {
     return JSON.parse(d.choices[0].message.content);
   } catch {
-    return { topics: ["uncategorized"], type: "observation" };
+    return { topics: ["uncategorized"], type: "observation", _fallback: true };
+  }
+  } catch {
+    return { topics: ["uncategorized"], type: "observation", _fallback: true };
   }
 }
 
@@ -82,10 +99,13 @@ server.registerTool(
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.5),
+      threshold: z.number().optional().default(0.38),
+      domain: z.string().optional().describe("Filter by domain: ecos-architecture, tango-pedagogy, ttc-board, neil-outreach, it-consulting, music-production, brain-protocol, personal"),
+      horizon: z.string().optional().describe("Filter by horizon: immediate, project, evergreen"),
+      signal_type: z.string().optional().describe("Filter by signal_type: taste, voice, struct, decision, framework, content"),
     },
   },
-  async ({ query, limit, threshold }) => {
+  async ({ query, limit, threshold, domain, horizon, signal_type }) => {
     try {
       const qEmb = await getEmbedding(query);
       const { data, error } = await supabase.rpc("match_thoughts", {
@@ -105,21 +125,28 @@ server.registerTool(
           content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }],
         };
       }
-      const results = data.map(
-        (
-          t: {
-            content: string;
-            metadata: Record<string, unknown>;
-            similarity: number;
-            created_at: string;
-          },
-          i: number
-        ) => {
+
+      // Apply post-query metadata filters
+      type RawResult = { id: string; content: string; metadata: Record<string, unknown>; similarity: number; created_at: string };
+      let filtered: RawResult[] = data;
+      if (domain) filtered = filtered.filter((t: RawResult) => t.metadata?.domain === domain);
+      if (horizon) filtered = filtered.filter((t: RawResult) => t.metadata?.horizon === horizon);
+      if (signal_type) filtered = filtered.filter((t: RawResult) => t.metadata?.signal_type === signal_type);
+
+      if (filtered.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: `No thoughts found matching "${query}" with the applied filters.` }],
+        };
+      }
+
+      const results = filtered.map(
+        (t: RawResult, i: number) => {
           const m = t.metadata || {};
           const parts = [
             `--- Result ${i + 1} (${(t.similarity * 100).toFixed(1)}% match) ---`,
+            `ID: ${t.id}`,
             `Captured: ${new Date(t.created_at).toLocaleDateString()}`,
-            `Type: ${m.type || "unknown"}`,
+            `Type: ${m.type || "unknown"}${m.domain ? ` | Domain: ${m.domain}` : ""}${m.horizon ? ` | Horizon: ${m.horizon}` : ""}${m.signal_type ? ` | Signal: ${m.signal_type}` : ""}`,
           ];
           if (Array.isArray(m.topics) && m.topics.length)
             parts.push(`Topics: ${(m.topics as string[]).join(", ")}`);
@@ -161,18 +188,26 @@ server.registerTool(
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
       days: z.number().optional().describe("Only thoughts from the last N days"),
+      domain: z.string().optional().describe("Filter by domain: ecos-architecture, tango-pedagogy, ttc-board, neil-outreach, it-consulting, music-production, brain-protocol, personal"),
+      horizon: z.string().optional().describe("Filter by horizon: immediate, project, evergreen"),
+      signal_type: z.string().optional().describe("Filter by signal_type: taste, voice, struct, decision, framework, content"),
+      collection_id: z.string().optional().describe("Filter by collection slug — returns all members of a named collection regardless of similarity"),
     },
   },
-  async ({ limit, type, topic, person, days }) => {
+  async ({ limit, type, topic, person, days, domain, horizon, signal_type, collection_id }) => {
     try {
       let q = supabase
         .from("thoughts")
-        .select("content, metadata, created_at")
+        .select("id, content, metadata, created_at")
         .order("created_at", { ascending: false })
         .limit(limit);
       if (type) q = q.contains("metadata", { type });
       if (topic) q = q.contains("metadata", { topics: [topic] });
       if (person) q = q.contains("metadata", { people: [person] });
+      if (domain) q = q.contains("metadata", { domain });
+      if (horizon) q = q.contains("metadata", { horizon });
+      if (signal_type) q = q.contains("metadata", { signal_type });
+      if (collection_id) q = q.contains("metadata", { collection_id });
       if (days) {
         const since = new Date();
         since.setDate(since.getDate() - days);
@@ -190,12 +225,13 @@ server.registerTool(
       }
       const results = data.map(
         (
-          t: { content: string; metadata: Record<string, unknown>; created_at: string },
+          t: { id: string; content: string; metadata: Record<string, unknown>; created_at: string },
           i: number
         ) => {
           const m = t.metadata || {};
           const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
-          return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}] (${m.type || "??"}${tags ? " - " + tags : ""})\n   ${t.content}`;
+          const meta = [m.type || "??", m.domain, m.horizon, m.signal_type].filter(Boolean).join(" | ");
+          return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}] (${meta}${tags ? " — " + tags : ""})\n   ID: ${t.id}\n   ${t.content}`;
         }
       );
       return {
@@ -291,14 +327,28 @@ server.registerTool(
   },
   async ({ content }) => {
     try {
-      const [embedding, metadata] = await Promise.all([
-        getEmbedding(content),
-        extractMetadata(content),
-      ]);
+      const metadata = await extractMetadata(content);
+      const meta = metadata as Record<string, unknown>;
+
+      const isFallback = !!meta._fallback;
+      delete meta._fallback;
+
+      // Use rewritten content for embedding + storage; fall back to original
+      const storedContent = (meta.rewritten_content as string)?.trim() || content;
+      delete meta.rewritten_content; // content field, not metadata
+      const needsSplit = !!meta.needs_split;
+      if (!needsSplit) delete meta.needs_split; // omit false flag from metadata
+
+      const embedding = await getEmbedding(storedContent);
       const { error } = await supabase.from("thoughts").insert({
-        content,
+        content: storedContent,
         embedding,
-        metadata: { ...metadata, source: "mcp" },
+        metadata: {
+          ...meta,
+          source: "mcp",
+          ...(isFallback ? { metadata_fallback: true } : {}),
+          ...(storedContent !== content ? { original_content: content } : {}),
+        },
       });
       if (error) {
         return {
@@ -306,7 +356,6 @@ server.registerTool(
           isError: true,
         };
       }
-      const meta = metadata as Record<string, unknown>;
       let confirmation = `Captured as ${meta.type || "thought"}`;
       if (Array.isArray(meta.topics) && meta.topics.length)
         confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
@@ -314,6 +363,12 @@ server.registerTool(
         confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
       if (Array.isArray(meta.action_items) && meta.action_items.length)
         confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+      if (storedContent !== content)
+        confirmation += ` | Rewritten for self-containment`;
+      if (needsSplit)
+        confirmation += ` | ⚠ needs_split: entry may contain multiple ideas`;
+      if (isFallback)
+        confirmation += ` | ⚠ metadata extraction unavailable — captured with fallback metadata (backfill pending)`;
       return {
         content: [{ type: "text" as const, text: confirmation }],
       };
