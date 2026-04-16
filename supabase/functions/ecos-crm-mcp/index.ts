@@ -15,6 +15,10 @@ const RELATIONSHIP_DOMAINS = ["tango", "ttc", "outreach", "it", "music", "person
 const ADMIN_STATUSES = ["active", "passive", "administrative_closed", "community"] as const;
 const OPPORTUNITY_STAGES = ["prospect", "qualified", "proposal", "closed_won", "closed_lost"] as const;
 
+// Fixed UUID representing the single ECOS user (Levi). This system has one
+// user and uses service-role auth — no Supabase auth users exist.
+const ECOS_USER_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+
 // --- MCP Server ---
 const server = new McpServer({
   name: "ecos-crm",
@@ -37,15 +41,14 @@ server.registerTool(
       tags: z.array(z.string()).optional().describe("Free-form tags"),
       notes: z.string().optional(),
       follow_up_date: z.string().optional().describe("ISO date string YYYY-MM-DD"),
-      user_id: z.string().optional().default("levi"),
     },
   },
-  async ({ name, relationship_domain, company, title, email, phone, tags, notes, follow_up_date, user_id }) => {
+  async ({ name, relationship_domain, company, title, email, phone, tags, notes, follow_up_date }) => {
     try {
       const { data, error } = await supabase
         .from("professional_contacts")
         .insert({
-          user_id: user_id ?? "levi",
+          user_id: ECOS_USER_ID,
           name,
           relationship_domain,
           company: company ?? null,
@@ -109,21 +112,24 @@ server.registerTool(
     description: "Record an interaction with a contact. Also updates last_contacted on the contact.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
-      interaction_type: z.string().describe("e.g. email, call, meeting, video_call, message"),
-      summary: z.string().optional().describe("One-line summary"),
-      notes: z.string().optional().describe("Longer notes"),
+      interaction_type: z.string().describe("e.g. email, call, meeting, video_call, message, in_person, note, slack, text, coffee, lunch, status_change"),
+      summary: z.string().describe("One-line summary (required)"),
+      follow_up_notes: z.string().optional().describe("Follow-up notes"),
+      follow_up_needed: z.boolean().optional().default(false),
       occurred_at: z.string().optional().describe("ISO datetime — defaults to now"),
     },
   },
-  async ({ contact_id, interaction_type, summary, notes, occurred_at }) => {
+  async ({ contact_id, interaction_type, summary, follow_up_notes, follow_up_needed, occurred_at }) => {
     try {
       const { error: insertErr } = await supabase
         .from("contact_interactions")
         .insert({
           contact_id,
+          user_id: ECOS_USER_ID,
           interaction_type,
           summary: summary ?? null,
-          notes: notes ?? null,
+          follow_up_notes: follow_up_notes ?? null,
+          follow_up_needed: follow_up_needed ?? false,
           occurred_at: occurred_at ?? new Date().toISOString(),
         });
       if (insertErr) return { content: [{ type: "text" as const, text: `Error: ${insertErr.message}` }], isError: true };
@@ -161,13 +167,13 @@ server.registerTool(
           .single(),
         supabase
           .from("contact_interactions")
-          .select("id, interaction_type, summary, notes, occurred_at")
+          .select("id, interaction_type, summary, follow_up_notes, occurred_at")
           .eq("contact_id", contact_id)
           .order("occurred_at", { ascending: false })
           .limit(20),
         supabase
           .from("opportunities")
-          .select("id, title, stage, value, close_date, notes")
+          .select("id, title, stage, value, expected_close_date, notes")
           .eq("contact_id", contact_id)
           .not("stage", "in", '("closed_won","closed_lost")')
           .order("created_at", { ascending: false }),
@@ -191,7 +197,7 @@ server.registerTool(
       if (oppsRes.data?.length) {
         lines.push("--- Open Opportunities ---");
         for (const o of oppsRes.data) {
-          lines.push(`• [${o.stage}] ${o.title}${o.value ? ` ($${o.value})` : ""}${o.close_date ? ` — closes ${o.close_date}` : ""}`);
+          lines.push(`• [${o.stage}] ${o.title}${o.value ? ` ($${o.value})` : ""}${o.expected_close_date ? ` — closes ${o.expected_close_date}` : ""}`);
         }
         lines.push("");
       }
@@ -199,7 +205,7 @@ server.registerTool(
       if (interactionsRes.data?.length) {
         lines.push("--- Interactions ---");
         for (const i of interactionsRes.data) {
-          lines.push(`• [${new Date(i.occurred_at).toLocaleDateString()}] ${i.interaction_type}${i.summary ? ` — ${i.summary}` : ""}${i.notes ? `\n  ${i.notes}` : ""}`);
+          lines.push(`• [${new Date(i.occurred_at).toLocaleDateString()}] ${i.interaction_type}${i.summary ? ` — ${i.summary}` : ""}${i.follow_up_notes ? `\n  Follow-up: ${i.follow_up_notes}` : ""}`);
         }
       } else {
         lines.push("No interactions logged.");
@@ -223,20 +229,21 @@ server.registerTool(
       title: z.string().describe("Opportunity title"),
       stage: z.enum(OPPORTUNITY_STAGES).optional().default("prospect"),
       value: z.number().optional().describe("Estimated value in dollars"),
-      close_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
+      expected_close_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
       notes: z.string().optional(),
     },
   },
-  async ({ contact_id, title, stage, value, close_date, notes }) => {
+  async ({ contact_id, title, stage, value, expected_close_date, notes }) => {
     try {
       const { data, error } = await supabase
         .from("opportunities")
         .insert({
           contact_id,
+          user_id: ECOS_USER_ID,
           title,
           stage: stage ?? "prospect",
           value: value ?? null,
-          close_date: close_date ?? null,
+          expected_close_date: expected_close_date ?? null,
           notes: notes ?? null,
         })
         .select("id, title, stage")
@@ -399,9 +406,10 @@ server.registerTool(
       if (note) {
         await supabase.from("contact_interactions").insert({
           contact_id,
+          user_id: ECOS_USER_ID,
           interaction_type: "status_change",
           summary: `Status set to ${status}`,
-          notes: note,
+          follow_up_notes: note,
           occurred_at: new Date().toISOString(),
         });
       }
@@ -486,9 +494,9 @@ server.registerTool(
           .order("follow_up_date", { ascending: true }),
         supabase
           .from("opportunities")
-          .select("id, title, stage, value, close_date, contact_id")
+          .select("id, title, stage, value, expected_close_date, contact_id")
           .not("stage", "in", '("closed_won","closed_lost")')
-          .order("close_date", { ascending: true }),
+          .order("expected_close_date", { ascending: true }),
         supabase
           .from("contact_interactions")
           .select("contact_id, interaction_type, summary, occurred_at, professional_contacts!inner(relationship_domain, name)")
@@ -520,7 +528,7 @@ server.registerTool(
         const byStage: Record<string, typeof opps> = {};
         for (const o of opps) byStage[o.stage] = [...(byStage[o.stage] ?? []), o];
         for (const [stage, items] of Object.entries(byStage)) {
-          lines.push(`${stage} (${items.length}): ${items.map((o) => `${o.title}${o.value ? ` $${o.value}` : ""}`).join(" | ")}`);
+          lines.push(`${stage} (${items.length}): ${items.map((o: {title: string; value?: number; expected_close_date?: string}) => `${o.title}${o.value ? ` $${o.value}` : ""}${o.expected_close_date ? ` [${o.expected_close_date}]` : ""}`).join(" | ")}`);
         }
       }
       lines.push("");
