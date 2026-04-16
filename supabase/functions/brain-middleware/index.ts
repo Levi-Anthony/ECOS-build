@@ -30,6 +30,7 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 async function extractMetadata(text: string): Promise<Record<string, unknown>> {
+  try {
   const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
     method: "POST",
     headers: {
@@ -42,23 +43,39 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
       messages: [
         {
           role: "system",
-          content: `Extract metadata from the user's captured thought. Return JSON with:
+          content: `You are processing a captured thought for storage in a semantic memory system. Complete two tasks and return a single JSON object.
+
+TASK 1 — Self-containment rewrite:
+Rewrite the content to stand alone when retrieved cold with no conversation context. Remove or replace session-specific references ("in this session," "as discussed," "earlier," "the above," etc.) by substituting the actual referent. If no session references exist, return the content unchanged. Preserve all meaning. Do not summarize.
+
+TASK 2 — Metadata extraction from the rewritten content:
+- "rewritten_content": the self-contained version from Task 1 (required)
+- "needs_split": true if this entry requires two distinct concept-labels to fully describe its content — i.e., it sits at the intersection of two semantic neighborhoods rather than at the center of one. Close relationship between the concepts is NOT a reason to omit this flag; closely-related but distinct mechanisms or claims are still two separate centers of mass. false only if one concept-label covers the entire entry.
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
-- "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
+- "dates_mentioned": array of dates as YYYY-MM-DD (empty if none)
 - "topics": array of 1-3 short topic tags (always at least one)
 - "type": one of "observation", "task", "idea", "reference", "person_note"
-Only extract what's explicitly there.`,
+- "domain": one of "ecos-architecture", "tango-pedagogy", "ttc-board", "neil-outreach", "it-consulting", "music-production", "brain-protocol", "personal" — choose the single best-fit domain
+- "horizon": one of "immediate" (time-sensitive, actionable now), "project" (relevant to an active project, not urgent), "evergreen" (durable reference or principle)
+- "signal_type": one of "taste" (aesthetic preference or style constraint), "voice" (tone, phrasing, communication style), "struct" (structural pattern or architecture), "decision" (committed choice or resolution), "framework" (conceptual model or heuristic), "content" (factual or narrative content)
+- "confidence": one of "observed" (directly witnessed or stated), "inferred" (reasoned from evidence), "hypothetical" (speculative or conditional)
+
+Return only the JSON object.`,
         },
         { role: "user", content: text },
       ],
     }),
   });
+  if (!r.ok) return { topics: ["uncategorized"], type: "observation", _fallback: true };
   const d = await r.json();
   try {
     return JSON.parse(d.choices[0].message.content);
   } catch {
-    return { topics: ["uncategorized"], type: "observation" };
+    return { topics: ["uncategorized"], type: "observation", _fallback: true };
+  }
+  } catch {
+    return { topics: ["uncategorized"], type: "observation", _fallback: true };
   }
 }
 
@@ -110,17 +127,32 @@ app.post("*/capture", async (c: Context) => {
       return c.json({ error: "content is required" }, 400);
     }
 
-    const [embedding, metadata] = await Promise.all([
-      getEmbedding(content),
-      extractMetadata(content),
-    ]);
+    const metadata = await extractMetadata(content);
+    const meta = metadata as Record<string, unknown>;
+
+    const isFallback = !!meta._fallback;
+    delete meta._fallback;
+
+    // Use rewritten content for embedding + storage; fall back to original
+    const storedContent = (meta.rewritten_content as string)?.trim() || content;
+    delete meta.rewritten_content;
+    const needsSplit = !!meta.needs_split;
+    if (!needsSplit) delete meta.needs_split;
+
+    const embedding = await getEmbedding(storedContent);
 
     const { data, error } = await supabase
       .from("thoughts")
       .insert({
-        content,
+        content: storedContent,
         embedding,
-        metadata: { ...metadata, source: source ?? "shortcut" },
+        metadata: {
+          ...meta,
+          source: source ?? "shortcut",
+          ...(needsSplit ? { needs_split: true } : {}),
+          ...(isFallback ? { metadata_fallback: true } : {}),
+          ...(storedContent !== content ? { original_content: content } : {}),
+        },
       })
       .select("id")
       .single();
@@ -129,12 +161,14 @@ app.post("*/capture", async (c: Context) => {
       return c.json({ error: error?.message ?? "Insert failed" }, 500);
     }
 
-    const meta = metadata as Record<string, unknown>;
     return c.json({
       id: data.id,
       status: "captured",
       type: meta.type ?? "observation",
       topics: Array.isArray(meta.topics) ? meta.topics : [],
+      ...(storedContent !== content ? { rewritten: true } : {}),
+      ...(needsSplit ? { needs_split: true } : {}),
+      ...(isFallback ? { metadata_fallback: true } : {}),
     });
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -147,12 +181,15 @@ app.post("*/capture", async (c: Context) => {
 app.post("*/search", async (c: Context) => {
   try {
     const body = await c.req.json();
-    const { query, limit = 5, threshold = 0.38, type, topic } = body as {
+    const { query, limit = 5, threshold = 0.38, type, topic, domain, horizon, signal_type } = body as {
       query?: string;
       limit?: number;
       threshold?: number;
       type?: string;
       topic?: string;
+      domain?: string;
+      horizon?: string;
+      signal_type?: string;
     };
 
     if (!query?.trim()) {
@@ -161,32 +198,33 @@ app.post("*/search", async (c: Context) => {
 
     const qEmb = await getEmbedding(query);
 
-    const filter: Record<string, unknown> = {};
-    if (type) filter.type = type;
-    if (topic) filter.topics = [topic];
-
     const { data, error } = await supabase.rpc("match_thoughts", {
       query_embedding: qEmb,
       match_threshold: threshold,
       match_count: limit,
-      filter: Object.keys(filter).length > 0 ? filter : {},
+      filter: {},
     });
 
     if (error) return c.json({ error: error.message }, 500);
 
-    const results = (data ?? []).map((t: {
-      id: string;
-      content: string;
-      metadata: Record<string, unknown>;
-      similarity: number;
-      created_at: string;
-    }) => {
+    type RawResult = { id: string; content: string; metadata: Record<string, unknown>; similarity: number; created_at: string };
+    let filtered: RawResult[] = data ?? [];
+    if (type) filtered = filtered.filter((t: RawResult) => t.metadata?.type === type);
+    if (topic) filtered = filtered.filter((t: RawResult) => Array.isArray(t.metadata?.topics) && (t.metadata.topics as string[]).includes(topic));
+    if (domain) filtered = filtered.filter((t: RawResult) => t.metadata?.domain === domain);
+    if (horizon) filtered = filtered.filter((t: RawResult) => t.metadata?.horizon === horizon);
+    if (signal_type) filtered = filtered.filter((t: RawResult) => t.metadata?.signal_type === signal_type);
+
+    const results = filtered.map((t: RawResult) => {
       const m = t.metadata || {};
       return {
         id: t.id,
         content: t.content,
         similarity: Math.round(t.similarity * 1000) / 1000,
         type: m.type ?? null,
+        domain: m.domain ?? null,
+        horizon: m.horizon ?? null,
+        signal_type: m.signal_type ?? null,
         topics: Array.isArray(m.topics) ? m.topics : [],
         people: Array.isArray(m.people) ? m.people : [],
         created_at: t.created_at,
@@ -278,6 +316,95 @@ app.delete("*/delete", async (c: Context) => {
     if (deleteErr) return c.json({ error: deleteErr.message }, 500);
 
     return c.json({ id, status: "deleted" });
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// GET */backfill/next?limit=50
+// Returns the next batch of thoughts missing the `domain` metadata field.
+// Used by the backfill agent to fetch unprocessed entries.
+// Returns: { entries: [{ id, content, metadata, created_at }], remaining: number }
+app.get("*/backfill/next", async (c: Context) => {
+  try {
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "50", 10) || 50, 100);
+
+    const [batchResult, countResult] = await Promise.all([
+      supabase
+        .from("thoughts")
+        .select("id, content, metadata, created_at")
+        .filter("metadata->>domain", "is", null)
+        .order("created_at", { ascending: true })
+        .limit(limit),
+      supabase
+        .from("thoughts")
+        .select("*", { count: "exact", head: true })
+        .filter("metadata->>domain", "is", null),
+    ]);
+
+    if (batchResult.error) return c.json({ error: batchResult.error.message }, 500);
+
+    return c.json({
+      entries: batchResult.data ?? [],
+      remaining: countResult.count ?? 0,
+    });
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// PATCH */backfill/apply
+// Body: { updates: [{ id, domain, horizon, signal_type, confidence }] }
+// Merges the 4 new schema fields into each thought's existing metadata JSONB.
+// Does NOT touch content or embedding — no re-indexing, no archiving.
+// Returns: { applied: number, errors: [{ id, error }] }
+app.patch("*/backfill/apply", async (c: Context) => {
+  try {
+    const body = await c.req.json();
+    const { updates } = body as {
+      updates?: Array<{
+        id: string;
+        domain?: string;
+        horizon?: string;
+        signal_type?: string;
+        confidence?: string;
+      }>;
+    };
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return c.json({ error: "updates array is required" }, 400);
+    }
+
+    const errors: Array<{ id: string; error: string }> = [];
+    let applied = 0;
+
+    for (const u of updates) {
+      if (!u.id) { errors.push({ id: u.id, error: "missing id" }); continue; }
+
+      const patch: Record<string, string> = {};
+      if (u.domain) patch.domain = u.domain;
+      if (u.horizon) patch.horizon = u.horizon;
+      if (u.signal_type) patch.signal_type = u.signal_type;
+      if (u.confidence) patch.confidence = u.confidence;
+
+      if (Object.keys(patch).length === 0) {
+        errors.push({ id: u.id, error: "no fields to patch" });
+        continue;
+      }
+
+      const { error } = await supabase.rpc("patch_thought_metadata", {
+        thought_id: u.id,
+        patch,
+      });
+
+      if (error) {
+        errors.push({ id: u.id, error: error.message });
+      } else {
+        applied++;
+      }
+    }
+
+    return c.json({ applied, errors });
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

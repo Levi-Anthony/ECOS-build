@@ -85,3 +85,25 @@ what you see so I can unblock you.
 ---
 
 *Paste once. Provide credentials when asked. Verify the final boot. Done.*
+
+---
+
+## Edge Function Environment Variables
+
+Set in Supabase Dashboard → Project Settings → Edge Functions → Secrets, or via `supabase secrets set`.
+
+| Variable | Used by | Description |
+|---|---|---|
+| `SUPABASE_URL` | both functions | Your project URL, e.g. `https://xxxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | both functions | Service role key (bypasses RLS) — Dashboard → API → service_role |
+| `OPENROUTER_API_KEY` | both functions | OpenRouter API key — used for embeddings (`text-embedding-3-small`) and metadata extraction (`gpt-4o-mini`) |
+| `MCP_ACCESS_KEY` | both functions | Shared secret for all clients — passed as `x-brain-key` header or `?key=` query param |
+
+**Deploy commands:**
+```bash
+cd ~/ecos
+supabase functions deploy open-brain-mcp --no-verify-jwt
+supabase functions deploy brain-middleware --no-verify-jwt
+```
+
+Note: `--no-verify-jwt` is required for both functions. Auth is handled by `MCP_ACCESS_KEY`, not Supabase JWTs.

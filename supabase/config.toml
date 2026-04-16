@@ -28,7 +28,7 @@ entrypoint = "./functions/open-brain-mcp/index.ts"
 # static_files = [ "./functions/open-brain-mcp/*.html" ]
 
 [functions.quick-capture]
-enabled = true
+enabled = false
 verify_jwt = true
 import_map = "./functions/quick-capture/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
