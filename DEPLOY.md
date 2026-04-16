@@ -104,6 +104,22 @@ Set in Supabase Dashboard → Project Settings → Edge Functions → Secrets, o
 cd ~/ecos
 supabase functions deploy open-brain-mcp --no-verify-jwt
 supabase functions deploy brain-middleware --no-verify-jwt
+supabase functions deploy ecos-crm-mcp --no-verify-jwt
 ```
 
-Note: `--no-verify-jwt` is required for both functions. Auth is handled by `MCP_ACCESS_KEY`, not Supabase JWTs.
+Note: `--no-verify-jwt` is required for all functions. Auth is handled by `MCP_ACCESS_KEY`, not Supabase JWTs.
+
+---
+
+## ecos-crm-mcp — CRM Agent Door
+
+MCP endpoint for ECOS relationship intelligence. Same auth pattern as open-brain-mcp.
+
+**12 tools:** `add_contact`, `search_contacts`, `log_interaction`, `get_contact_history`, `create_opportunity`, `get_follow_ups_due`, `update_contact`, `get_contacts_by_domain`, `set_administrative_status`, `link_thought_to_contact`, `get_briefing_context`, `get_linked_thoughts`
+
+**Connect from Claude Code:**
+```bash
+claude mcp add --transport http ecos-crm \
+  [SUPABASE_URL]/functions/v1/ecos-crm-mcp \
+  --header "x-brain-key: [ACCESS_KEY]"
+```
