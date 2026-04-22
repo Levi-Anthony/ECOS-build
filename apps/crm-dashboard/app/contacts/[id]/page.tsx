@@ -1,8 +1,8 @@
-import { supabase, Contact, Interaction, Opportunity, ThoughtLink, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
+import { supabase, Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 export default async function ContactDetailPage({ params }: { params: { id: string } }) {
-  const [contactRes, interactionsRes, oppsRes] = await Promise.all([
+  const [contactRes, interactionsRes, oppsRes, snapshotRes, observationsRes] = await Promise.all([
     supabase
       .from("professional_contacts")
       .select("*")
@@ -19,6 +19,18 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
       .select("id, title, stage, value, expected_close_date, notes")
       .eq("contact_id", params.id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("person_snapshots")
+      .select("snapshot_content, domains_covered, compiled_by, version, created_at")
+      .eq("contact_id", params.id)
+      .eq("is_current", true)
+      .maybeSingle(),
+    supabase
+      .from("person_observations")
+      .select("id, observation_type, content, confidence, domain_context, observed_at, linked_thought_id")
+      .eq("contact_id", params.id)
+      .order("observed_at", { ascending: false })
+      .limit(20),
   ]);
 
   if (contactRes.error || !contactRes.data) notFound();
@@ -27,6 +39,8 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
   const interactions = (interactionsRes.data ?? []) as Interaction[];
   const opportunities = (oppsRes.data ?? []) as Opportunity[];
   const thoughtLinks: ThoughtLink[] = Array.isArray(contact.thought_links) ? contact.thought_links : [];
+  const snapshot = snapshotRes.data as PersonSnapshot | null;
+  const observations = (observationsRes.data ?? []) as PersonObservation[];
 
   const STAGE_COLORS: Record<string, string> = {
     prospect: "bg-gray-100 text-gray-700",
@@ -142,6 +156,58 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Person Card */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <h2 className="font-semibold mb-3 flex items-center gap-2">
+          <span className="text-indigo-500">◈</span> Person Card
+          {snapshot && (
+            <span className="text-xs text-gray-400 font-normal">
+              v{snapshot.version} · {new Date(snapshot.created_at).toLocaleDateString()} · {snapshot.compiled_by}
+            </span>
+          )}
+        </h2>
+        {snapshot ? (
+          <div className="text-sm text-gray-700 whitespace-pre-wrap">{snapshot.snapshot_content}</div>
+        ) : (
+          <p className="text-gray-400 text-sm">No compiled snapshot yet.</p>
+        )}
+      </div>
+
+      {/* Observations */}
+      {observations.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+          <h2 className="font-semibold mb-3">
+            <span className="text-emerald-500">◉</span> Observations ({observations.length})
+          </h2>
+          {(["fact", "observation", "interpretation", "hypothesis", "strategy"] as const).map(type => {
+            const group = observations.filter(o => o.observation_type === type);
+            if (!group.length) return null;
+            return (
+              <div key={type} className="mb-4 last:mb-0">
+                <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">{type}</h3>
+                <div className="space-y-2">
+                  {group.map(o => (
+                    <div key={o.id} className="flex gap-3 py-1.5 border-b border-gray-50 last:border-0">
+                      <div className="flex-shrink-0 text-xs text-gray-400 mt-0.5 w-4 text-center font-medium">{o.confidence}</div>
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-800">{o.content}</p>
+                        <div className="flex gap-3 mt-0.5">
+                          {o.domain_context && <span className="text-xs text-gray-400">{o.domain_context}</span>}
+                          <span className="text-xs text-gray-400">{new Date(o.observed_at).toLocaleDateString()}</span>
+                          {o.linked_thought_id && (
+                            <a href={`/brain/${o.linked_thought_id}`} className="text-xs text-purple-500 hover:underline">◆ BRAIN</a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

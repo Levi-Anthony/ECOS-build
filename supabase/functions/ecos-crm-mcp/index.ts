@@ -11,6 +11,26 @@ const MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+async function getEmbedding(text: string): Promise<number[]> {
+  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text }),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => "");
+    throw new Error(`OpenRouter embeddings failed: ${r.status} ${msg}`);
+  }
+  const d = await r.json();
+  return d.data[0].embedding;
+}
+
 const RELATIONSHIP_DOMAINS = ["tango", "ttc", "outreach", "it", "music", "personal", "general"] as const;
 const ADMIN_STATUSES = ["active", "passive", "administrative_closed", "community"] as const;
 const OPPORTUNITY_STAGES = ["prospect", "qualified", "proposal", "closed_won", "closed_lost"] as const;
@@ -589,6 +609,449 @@ server.registerTool(
         `${i + 1}. [${new Date(l.linked_at).toLocaleDateString()}] ${l.thought_id}\n   "${l.content_preview}"`
       );
       return { content: [{ type: "text" as const, text: `${links.length} linked thought(s) for ${data.name}:\n\n${lines.join("\n\n")}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 13: log_service_call ───────────────────────────────────────────────
+server.registerTool(
+  "log_service_call",
+  {
+    title: "Log Service Call",
+    description: "Log an IT service call for a client. Inserts into it_service_logs and updates last_contacted on the contact.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID of the IT client"),
+      service_type: z.enum(["onsite", "remote", "phone", "email", "project", "maintenance"]),
+      description: z.string().describe("What was done"),
+      service_date: z.string().optional().describe("ISO date YYYY-MM-DD — defaults to today"),
+      time_spent_minutes: z.number().optional(),
+      billable: z.boolean().optional().default(true),
+      resolution: z.string().optional(),
+      follow_up_needed: z.boolean().optional().default(false),
+      follow_up_notes: z.string().optional(),
+    },
+  },
+  async ({ contact_id, service_type, description, service_date, time_spent_minutes, billable, resolution, follow_up_needed, follow_up_notes }) => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const { data, error } = await supabase
+        .from("it_service_logs")
+        .insert({
+          user_id: ECOS_USER_ID,
+          contact_id,
+          service_type,
+          description,
+          service_date: service_date ?? today,
+          time_spent_minutes: time_spent_minutes ?? null,
+          billable: billable ?? true,
+          resolution: resolution ?? null,
+          follow_up_needed: follow_up_needed ?? false,
+          follow_up_notes: follow_up_notes ?? null,
+        })
+        .select("id")
+        .single();
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+
+      await supabase
+        .from("professional_contacts")
+        .update({ last_contacted: today, updated_at: new Date().toISOString() })
+        .eq("id", contact_id);
+
+      return { content: [{ type: "text" as const, text: `Logged ${service_type} service call for contact ${contact_id} — ID: ${data.id}${time_spent_minutes ? ` (${time_spent_minutes} min)` : ""}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 14: get_client_service_history ────────────────────────────────────
+server.registerTool(
+  "get_client_service_history",
+  {
+    title: "Get Client Service History",
+    description: "Retrieve service logs for an IT client, newest first.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID"),
+      limit: z.number().optional().default(20),
+    },
+  },
+  async ({ contact_id, limit }) => {
+    try {
+      const { data, error } = await supabase
+        .from("it_service_logs")
+        .select("id, service_date, service_type, description, resolution, time_spent_minutes, billable, billed, follow_up_needed, follow_up_notes")
+        .eq("contact_id", contact_id)
+        .order("service_date", { ascending: false })
+        .limit(limit ?? 20);
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!data?.length) return { content: [{ type: "text" as const, text: `No service logs found for contact ${contact_id}.` }] };
+
+      const lines = data.map((l) =>
+        `• [${l.service_date}] ${l.service_type.toUpperCase()}${l.time_spent_minutes ? ` ${l.time_spent_minutes}min` : ""} ${l.billable ? (l.billed ? "[billed]" : "[unbilled]") : "[no-bill]"}\n  ${l.description}${l.resolution ? `\n  Resolution: ${l.resolution}` : ""}${l.follow_up_needed ? `\n  Follow-up: ${l.follow_up_notes ?? "needed"}` : ""}\n  ID: ${l.id}`
+      );
+      return { content: [{ type: "text" as const, text: `${data.length} service log(s):\n\n${lines.join("\n\n")}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 15: get_unbilled_work ──────────────────────────────────────────────
+server.registerTool(
+  "get_unbilled_work",
+  {
+    title: "Get Unbilled Work",
+    description: "List billable but unbilled service logs. Omit contact_id to see all clients.",
+    inputSchema: {
+      contact_id: z.string().uuid().optional().describe("Filter to one client; omit for all"),
+    },
+  },
+  async ({ contact_id }) => {
+    try {
+      let q = supabase
+        .from("it_service_logs")
+        .select("id, contact_id, service_date, service_type, description, time_spent_minutes, professional_contacts!inner(name, company)")
+        .eq("user_id", ECOS_USER_ID)
+        .eq("billable", true)
+        .eq("billed", false)
+        .order("service_date", { ascending: false });
+      if (contact_id) q = q.eq("contact_id", contact_id);
+
+      const { data, error } = await q;
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!data?.length) return { content: [{ type: "text" as const, text: "No unbilled work found." }] };
+
+      type LogRow = { id: string; contact_id: string; service_date: string; service_type: string; description: string; time_spent_minutes: number | null; professional_contacts: { name: string; company: string | null } | null };
+      const byContact: Record<string, { name: string; logs: LogRow[]; totalMin: number }> = {};
+      for (const l of data as LogRow[]) {
+        const cid = l.contact_id;
+        if (!byContact[cid]) byContact[cid] = { name: l.professional_contacts?.name ?? cid, logs: [], totalMin: 0 };
+        byContact[cid].logs.push(l);
+        byContact[cid].totalMin += l.time_spent_minutes ?? 0;
+      }
+
+      const lines: string[] = [`Unbilled work (${data.length} logs across ${Object.keys(byContact).length} client(s)):\n`];
+      for (const [cid, { name, logs, totalMin }] of Object.entries(byContact)) {
+        lines.push(`── ${name} (${logs.length} logs, ${totalMin} min total) — contact ID: ${cid}`);
+        for (const l of logs) {
+          lines.push(`  • [${l.service_date}] ${l.service_type} — ${l.description.slice(0, 80)}${l.time_spent_minutes ? ` (${l.time_spent_minutes}min)` : ""} | ID: ${l.id}`);
+        }
+        lines.push("");
+      }
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 16: create_billing_entry ───────────────────────────────────────────
+server.registerTool(
+  "create_billing_entry",
+  {
+    title: "Create Billing Entry",
+    description: "Create a billing entry and atomically mark all referenced service logs as billed via create_billing_entry_tx.",
+    inputSchema: {
+      contact_id: z.string().uuid(),
+      service_log_ids: z.array(z.string().uuid()).describe("Service log UUIDs to include in this invoice"),
+      amount: z.number().describe("Invoice amount in dollars"),
+      description: z.string().optional(),
+      invoice_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
+      notes: z.string().optional(),
+    },
+  },
+  async ({ contact_id, service_log_ids, amount, description, invoice_date, notes }) => {
+    try {
+      const { data, error } = await supabase.rpc("create_billing_entry_tx", {
+        p_user_id: ECOS_USER_ID,
+        p_contact_id: contact_id,
+        p_log_ids: service_log_ids,
+        p_amount: amount,
+        p_description: description ?? null,
+        p_invoice_date: invoice_date ?? null,
+        p_notes: notes ?? null,
+      });
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Created billing entry ID: ${data}\nMarked ${service_log_ids.length} log(s) as billed. Amount: $${amount}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 17: update_billing_status ─────────────────────────────────────────
+server.registerTool(
+  "update_billing_status",
+  {
+    title: "Update Billing Status",
+    description: "Update the status of a billing entry to 'sent' or 'paid'. Pass paid_date when marking paid.",
+    inputSchema: {
+      billing_entry_id: z.string().uuid(),
+      status: z.enum(["sent", "paid"]),
+      paid_date: z.string().optional().describe("ISO date YYYY-MM-DD — required when status=paid"),
+    },
+  },
+  async ({ billing_entry_id, status, paid_date }) => {
+    try {
+      const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+      if (paid_date) patch.paid_date = paid_date;
+
+      const { error } = await supabase
+        .from("it_billing_entries")
+        .update(patch)
+        .eq("id", billing_entry_id);
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Updated billing entry ${billing_entry_id} → ${status}${paid_date ? ` (paid ${paid_date})` : ""}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 18: add_person_observation ────────────────────────────────────────
+server.registerTool(
+  "add_person_observation",
+  {
+    title: "Add Person Observation",
+    description: "Record an analytical observation about a contact — pattern insight, interpretation, hypothesis, or strategy. Separate from interaction event logging.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID"),
+      observation_type: z.enum(["fact", "observation", "interpretation", "hypothesis", "strategy"]),
+      content: z.string().describe("The observation — a standalone statement that makes sense without surrounding context"),
+      confidence: z.number().int().min(1).max(5).describe("Confidence 1-5"),
+      domain_context: z.string().optional().describe("Domain this observation is scoped to, e.g. 'tango', 'ttc'"),
+      observed_at: z.string().optional().describe("ISO timestamp — defaults to now"),
+      source: z.string().optional().describe("Source client — defaults to 'claude-code'"),
+      linked_thought_id: z.string().uuid().optional().describe("UUID of a BRAIN thought this observation is linked to"),
+    },
+  },
+  async ({ contact_id, observation_type, content, confidence, domain_context, observed_at, source, linked_thought_id }) => {
+    try {
+      const { data, error } = await supabase
+        .from("person_observations")
+        .insert({
+          contact_id,
+          observation_type,
+          content,
+          confidence,
+          domain_context: domain_context ?? null,
+          observed_at: observed_at ?? new Date().toISOString(),
+          source: source ?? "claude-code",
+          linked_thought_id: linked_thought_id ?? null,
+        })
+        .select("id")
+        .single();
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Observation recorded — ID: ${data.id}\nType: ${observation_type} | Confidence: ${confidence}/5${domain_context ? ` | Domain: ${domain_context}` : ""}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 19: get_person_observations ───────────────────────────────────────
+server.registerTool(
+  "get_person_observations",
+  {
+    title: "Get Person Observations",
+    description: "Retrieve analytical observations for a contact, grouped by type. Separate from interaction history.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID"),
+      observation_type: z.enum(["fact", "observation", "interpretation", "hypothesis", "strategy"]).optional().describe("Filter to one type"),
+      limit: z.number().optional().default(20),
+    },
+  },
+  async ({ contact_id, observation_type, limit }) => {
+    try {
+      let q = supabase
+        .from("person_observations")
+        .select("id, observation_type, content, confidence, domain_context, observed_at, linked_thought_id")
+        .eq("contact_id", contact_id)
+        .order("observed_at", { ascending: false })
+        .limit(limit ?? 20);
+      if (observation_type) q = q.eq("observation_type", observation_type);
+
+      const { data, error } = await q;
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!data?.length) return { content: [{ type: "text" as const, text: `No observations found for contact ${contact_id}${observation_type ? ` of type ${observation_type}` : ""}.` }] };
+
+      type Obs = { id: string; observation_type: string; content: string; confidence: number; domain_context: string | null; observed_at: string; linked_thought_id: string | null };
+      const grouped: Record<string, Obs[]> = {};
+      for (const o of data as Obs[]) {
+        if (!grouped[o.observation_type]) grouped[o.observation_type] = [];
+        grouped[o.observation_type].push(o);
+      }
+
+      const lines: string[] = [`${data.length} observation(s) for contact ${contact_id}:\n`];
+      for (const [type, items] of Object.entries(grouped)) {
+        lines.push(`── ${type.toUpperCase()} (${items.length}) ──`);
+        for (const o of items) {
+          lines.push(`• [${o.confidence}/5] ${o.content}${o.domain_context ? ` [${o.domain_context}]` : ""}${o.linked_thought_id ? ` ◆ ${o.linked_thought_id}` : ""}`);
+          lines.push(`  ${new Date(o.observed_at).toLocaleDateString()} | ID: ${o.id}`);
+        }
+        lines.push("");
+      }
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 20: compile_person_snapshot ───────────────────────────────────────
+server.registerTool(
+  "compile_person_snapshot",
+  {
+    title: "Compile Person Snapshot",
+    description: "Write a versioned compiled person card for a contact. Uses compile_snapshot_tx to atomically flip the previous snapshot to is_current=false.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID"),
+      snapshot_content: z.string().describe("The compiled person card — readable prose summary"),
+      domains_covered: z.array(z.string()).optional().describe("Domains this snapshot covers"),
+      source_observation_ids: z.array(z.string().uuid()).optional().describe("person_observations UUIDs used as source"),
+      source_thought_ids: z.array(z.string().uuid()).optional().describe("BRAIN thought UUIDs used as source"),
+    },
+  },
+  async ({ contact_id, snapshot_content, domains_covered, source_observation_ids, source_thought_ids }) => {
+    try {
+      const { data, error } = await supabase.rpc("compile_snapshot_tx", {
+        p_contact_id: contact_id,
+        p_snapshot_content: snapshot_content,
+        p_domains_covered: domains_covered ?? [],
+        p_source_observation_ids: source_observation_ids ?? [],
+        p_source_thought_ids: source_thought_ids ?? [],
+        p_compiled_by: "claude-code",
+      });
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Person snapshot compiled — ID: ${data}\nContact: ${contact_id}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 21: get_person_card ────────────────────────────────────────────────
+server.registerTool(
+  "get_person_card",
+  {
+    title: "Get Person Card",
+    description: "Composite person card: contact header, latest compiled snapshot, recent observations grouped by type, and linked BRAIN thoughts. Primary agent entry point for pre-meeting context.",
+    inputSchema: {
+      contact_id: z.string().uuid().describe("Contact UUID"),
+    },
+  },
+  async ({ contact_id }) => {
+    try {
+      const [contactRes, snapshotRes, observationsRes] = await Promise.all([
+        supabase.from("professional_contacts").select("*").eq("id", contact_id).single(),
+        supabase.from("person_snapshots").select("snapshot_content, domains_covered, compiled_by, version, created_at").eq("contact_id", contact_id).eq("is_current", true).maybeSingle(),
+        supabase.from("person_observations").select("observation_type, content, confidence, domain_context, observed_at, linked_thought_id").eq("contact_id", contact_id).order("observed_at", { ascending: false }).limit(10),
+      ]);
+
+      if (contactRes.error || !contactRes.data) return { content: [{ type: "text" as const, text: `Contact not found: ${contactRes.error?.message ?? "no row"}` }], isError: true };
+      const c = contactRes.data;
+
+      const lines: string[] = [
+        `=== ${c.name} ===`,
+        c.company ? `Company: ${c.company}` : "",
+        c.title ? `Title: ${c.title}` : "",
+        `Domain: ${c.relationship_domain} | Status: ${c.administrative_status}`,
+        c.email ? `Email: ${c.email}` : "",
+        c.phone ? `Phone: ${c.phone}` : "",
+        c.follow_up_date ? `Follow-up: ${c.follow_up_date}` : "",
+        "",
+      ].filter(l => l !== "");
+
+      // Snapshot
+      const snap = snapshotRes.data;
+      lines.push("── Person Card ──");
+      if (snap) {
+        lines.push(`v${snap.version} · ${new Date(snap.created_at).toLocaleDateString()} · ${snap.compiled_by}`);
+        lines.push(snap.snapshot_content);
+      } else {
+        lines.push("No compiled snapshot yet.");
+      }
+      lines.push("");
+
+      // Observations
+      type Obs = { observation_type: string; content: string; confidence: number; domain_context: string | null; observed_at: string; linked_thought_id: string | null };
+      const obs = (observationsRes.data ?? []) as Obs[];
+      if (obs.length) {
+        lines.push("── Observations ──");
+        const grouped: Record<string, Obs[]> = {};
+        for (const o of obs) {
+          if (!grouped[o.observation_type]) grouped[o.observation_type] = [];
+          grouped[o.observation_type].push(o);
+        }
+        for (const [type, items] of Object.entries(grouped)) {
+          lines.push(`${type}:`);
+          for (const o of items) {
+            lines.push(`  [${o.confidence}/5] ${o.content}${o.domain_context ? ` [${o.domain_context}]` : ""}`);
+          }
+        }
+        lines.push("");
+      }
+
+      // Linked BRAIN thoughts
+      const thoughtLinks: unknown[] = Array.isArray(c.thought_links) ? c.thought_links : [];
+      if (thoughtLinks.length) {
+        lines.push("── BRAIN Links ──");
+        type TL = { thought_id: string; content_preview: string; linked_at: string };
+        for (const l of thoughtLinks as TL[]) {
+          lines.push(`• ${l.thought_id}\n  "${l.content_preview}"`);
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool 22: search_brain_for_contact ──────────────────────────────────────
+server.registerTool(
+  "search_brain_for_contact",
+  {
+    title: "Search BRAIN for Contact",
+    description: "Semantic search of BRAIN thoughts using a contact's name and optional domain. Uses threshold 0.30 by default — lower than standard to surface analytical/framework entries about people.",
+    inputSchema: {
+      contact_name: z.string().describe("Person's name to search for, e.g. 'Victoria Hermosilla'"),
+      domain_context: z.string().optional().describe("Optional domain filter, e.g. 'tango', 'ttc'"),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.30),
+    },
+  },
+  async ({ contact_name, domain_context, limit, threshold }) => {
+    try {
+      if (!OPENROUTER_API_KEY) {
+        return { content: [{ type: "text" as const, text: "Error: OPENROUTER_API_KEY not configured in ecos-crm-mcp secrets. Add it via Supabase Dashboard → Edge Functions → ecos-crm-mcp → Secrets." }], isError: true };
+      }
+      const query = `${contact_name}${domain_context ? " " + domain_context : ""} person notes observations pattern behavior`;
+      const embedding = await getEmbedding(query);
+
+      const { data, error } = await supabase.rpc("match_thoughts", {
+        query_embedding: embedding,
+        match_threshold: threshold ?? 0.30,
+        match_count: limit ?? 10,
+        filter: {},
+      });
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!data?.length) return { content: [{ type: "text" as const, text: `No BRAIN entries found for "${contact_name}" at threshold ${threshold ?? 0.30}.` }] };
+
+      type ThoughtMatch = { id: string; content: string; similarity: number; metadata?: { domain?: string; type?: string; signal_type?: string } };
+      const results = data as ThoughtMatch[];
+      const lines: string[] = [`${results.length} BRAIN entry(ies) for "${contact_name}":\n`];
+      for (const t of results) {
+        const sim = (t.similarity * 100).toFixed(1);
+        const meta = t.metadata ?? {};
+        lines.push(`• [${sim}%] ${meta.type ?? ""}${meta.domain ? " · " + meta.domain : ""}${meta.signal_type ? " · " + meta.signal_type : ""}`);
+        lines.push(`  ${t.content.slice(0, 200)}${t.content.length > 200 ? "…" : ""}`);
+        lines.push(`  ID: ${t.id}`);
+      }
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }

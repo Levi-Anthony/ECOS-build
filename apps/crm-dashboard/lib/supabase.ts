@@ -53,6 +53,87 @@ export type ThoughtLink = {
   linked_at: string;
 };
 
+export type Thought = {
+  id: string;
+  content: string;
+  created_at: string;
+  status: string;
+  retrieval_count: number;
+  source_id: string | null;
+  metadata: {
+    type?: string;
+    domain?: string;
+    horizon?: string;
+    signal_type?: string;
+    confidence?: string;
+    topics?: string[];
+    people?: string[];
+    action_items?: string[];
+    needs_split?: boolean;
+    metadata_fallback?: boolean;
+  };
+};
+
+export type ServiceLog = {
+  id: string;
+  contact_id: string;
+  service_date: string;
+  service_type: "onsite" | "remote" | "phone" | "email" | "project" | "maintenance";
+  description: string;
+  resolution?: string;
+  time_spent_minutes?: number;
+  billable: boolean;
+  billed: boolean;
+  follow_up_needed: boolean;
+  follow_up_notes?: string;
+  created_at: string;
+};
+
+export type BillingEntry = {
+  id: string;
+  contact_id: string;
+  service_log_ids: string[];
+  description?: string;
+  amount?: number;
+  status: "draft" | "sent" | "paid";
+  invoice_date?: string;
+  paid_date?: string;
+  notes?: string;
+  created_at: string;
+};
+
+export type Briefing = {
+  id: string;
+  briefing_type: "morning" | "pre_meeting" | "checkin" | "evening" | "habit_reminder" | "weekly_review" | "custom";
+  content: string;
+  delivered_via: string;
+  user_responded: boolean;
+  created_at: string;
+};
+
+export type PersonObservation = {
+  id: string;
+  contact_id: string;
+  observation_type: "fact" | "observation" | "interpretation" | "hypothesis" | "strategy";
+  content: string;
+  confidence: number;
+  domain_context: string | null;
+  observed_at: string;
+  linked_thought_id: string | null;
+  created_at: string;
+};
+
+export type PersonSnapshot = {
+  id: string;
+  contact_id: string;
+  snapshot_content: string;
+  domains_covered: string[];
+  compiled_by: string;
+  version: number;
+  is_current: boolean;
+  created_at: string;
+};
+
 export const DOMAIN_LABELS: Record<string, string> = {
   tango: "Tango",
   ttc: "TTC",
