@@ -1,4 +1,4 @@
-import { supabase, DOMAIN_COLORS, DOMAIN_LABELS, Briefing } from "@/lib/supabase";
+import { supabase, DOMAIN_COLORS, DOMAIN_LABELS, STAGE_COLORS, BRAIN_DOMAIN_COLORS, BRAIN_DOMAIN_LABELS, Briefing } from "@/lib/supabase";
 
 const BRAIN_DOMAINS = [
   "ecos-architecture",
@@ -10,36 +10,6 @@ const BRAIN_DOMAINS = [
   "brain-protocol",
   "personal",
 ];
-
-const BRAIN_DOMAIN_LABELS: Record<string, string> = {
-  "ecos-architecture": "ECOS Arch",
-  "tango-pedagogy": "Tango",
-  "ttc-board": "TTC",
-  "neil-outreach": "Neil",
-  "it-consulting": "IT",
-  "music-production": "Music",
-  "brain-protocol": "BRAIN",
-  "personal": "Personal",
-};
-
-const BRAIN_DOMAIN_COLORS: Record<string, string> = {
-  "ecos-architecture": "bg-slate-100 text-slate-700",
-  "tango-pedagogy": "bg-rose-100 text-rose-800",
-  "ttc-board": "bg-orange-100 text-orange-800",
-  "neil-outreach": "bg-amber-100 text-amber-800",
-  "it-consulting": "bg-blue-100 text-blue-800",
-  "music-production": "bg-purple-100 text-purple-800",
-  "brain-protocol": "bg-cyan-100 text-cyan-800",
-  "personal": "bg-green-100 text-green-800",
-};
-
-const STAGE_COLORS: Record<string, string> = {
-  prospect: "bg-gray-100 text-gray-700",
-  qualified: "bg-blue-100 text-blue-800",
-  proposal: "bg-amber-100 text-amber-800",
-  closed_won: "bg-green-100 text-green-800",
-  closed_lost: "bg-red-100 text-red-800",
-};
 
 function relativeAge(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -75,6 +45,7 @@ export default async function WeeklyPage() {
     { data: followUps },
     { data: opps },
     { data: recentBriefings },
+    { data: unbilledLogs },
   ] = await Promise.all([
     supabase
       .from("thoughts")
@@ -105,6 +76,11 @@ export default async function WeeklyPage() {
       .from("life_engine_briefings")
       .select("id, user_responded, created_at")
       .gte("created_at", weekAgo.toISOString()),
+    supabase
+      .from("it_service_logs")
+      .select("contact_id, time_spent_minutes")
+      .eq("billable", true)
+      .eq("billed", false),
   ]);
 
   // BRAIN domain summary
@@ -119,6 +95,24 @@ export default async function WeeklyPage() {
     }
   }
   const staleDomains = BRAIN_DOMAINS.filter((d) => !domainCounts[d]);
+
+  // IT unbilled aggregation
+  const unbilledByContact: Record<string, { count: number; totalMin: number }> = {};
+  for (const log of unbilledLogs ?? []) {
+    if (!unbilledByContact[log.contact_id]) unbilledByContact[log.contact_id] = { count: 0, totalMin: 0 };
+    unbilledByContact[log.contact_id].count++;
+    unbilledByContact[log.contact_id].totalMin += log.time_spent_minutes ?? 0;
+  }
+  const totalUnbilledMin = (unbilledLogs ?? []).reduce((s, l) => s + (l.time_spent_minutes ?? 0), 0);
+  const unbilledContactIds = Object.keys(unbilledByContact);
+  let unbilledContactNames: Record<string, string> = {};
+  if (unbilledContactIds.length > 0) {
+    const { data: nameRows } = await supabase
+      .from("professional_contacts")
+      .select("id, name")
+      .in("id", unbilledContactIds);
+    for (const row of nameRows ?? []) unbilledContactNames[row.id] = row.name;
+  }
 
   // Briefing stats
   const briefingTotal = recentBriefings?.length ?? 0;
@@ -272,7 +266,39 @@ export default async function WeeklyPage() {
         )}
       </section>
 
-      {/* Section 5 — Pulse */}
+      {/* Section 5 — IT Unbilled */}
+      <section>
+        <h2 className="text-base font-semibold text-gray-700 mb-3">IT Unbilled</h2>
+        {totalUnbilledMin === 0 ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-700">
+            No unbilled IT work — clear.
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-amber-800">
+                {(totalUnbilledMin / 60).toFixed(1)} hrs unbilled across {unbilledContactIds.length} client{unbilledContactIds.length !== 1 ? "s" : ""}
+              </span>
+              <a href="/it" className="text-sm text-blue-600 hover:text-blue-800">View IT →</a>
+            </div>
+            <div className="space-y-1.5">
+              {unbilledContactIds.map((cid) => {
+                const { count, totalMin } = unbilledByContact[cid];
+                return (
+                  <div key={cid} className="flex items-center justify-between text-sm">
+                    <a href={`/it/${cid}`} className="text-blue-600 hover:text-blue-800">
+                      {unbilledContactNames[cid] ?? cid}
+                    </a>
+                    <span className="text-amber-700">{count} log{count !== 1 ? "s" : ""} · {(totalMin / 60).toFixed(1)}h</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Section 6 — Pulse */}
       <section>
         <h2 className="text-base font-semibold text-gray-700 mb-3">Life Engine</h2>
         <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between">

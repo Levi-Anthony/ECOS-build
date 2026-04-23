@@ -1,7 +1,7 @@
 import { supabase, Contact, ServiceLog } from "@/lib/supabase";
 
 export default async function ITPage() {
-  const [clientsRes, unbilledRes] = await Promise.all([
+  const [clientsRes, unbilledRes, lastServiceRes] = await Promise.all([
     supabase
       .from("professional_contacts")
       .select("id, name, company, title, email, phone, follow_up_date, last_contacted, administrative_status")
@@ -13,10 +13,21 @@ export default async function ITPage() {
       .select("id, contact_id, time_spent_minutes")
       .eq("billable", true)
       .eq("billed", false),
+    supabase
+      .from("it_service_logs")
+      .select("contact_id, service_date")
+      .order("service_date", { ascending: false }),
   ]);
 
   const clients = (clientsRes.data ?? []) as Contact[];
   const unbilledLogs = (unbilledRes.data ?? []) as ServiceLog[];
+
+  const lastServiceByContact: Record<string, string> = {};
+  for (const row of lastServiceRes.data ?? []) {
+    if (!lastServiceByContact[row.contact_id]) {
+      lastServiceByContact[row.contact_id] = row.service_date;
+    }
+  }
 
   // Aggregate unbilled time per contact
   const unbilledByContact: Record<string, { count: number; totalMin: number }> = {};
@@ -105,7 +116,7 @@ export default async function ITPage() {
                     {c.phone && <span>{c.phone}</span>}
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {c.last_contacted ? new Date(c.last_contacted).toLocaleDateString() : <span className="text-gray-300">—</span>}
+                    {lastServiceByContact[c.id] ? new Date(lastServiceByContact[c.id]).toLocaleDateString() : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3">
                     {unbilled ? (

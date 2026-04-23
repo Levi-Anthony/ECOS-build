@@ -171,3 +171,33 @@ export const STATUS_LABELS: Record<string, string> = {
   administrative_closed: "Closed",
   community: "Community",
 };
+
+export const STAGE_COLORS: Record<string, string> = {
+  prospect: "bg-gray-100 text-gray-700",
+  qualified: "bg-blue-100 text-blue-800",
+  proposal: "bg-purple-100 text-purple-800",
+  closed_won: "bg-green-100 text-green-800",
+  closed_lost: "bg-red-100 text-red-800",
+};
+
+export const BRAIN_DOMAIN_COLORS: Record<string, string> = {
+  "ecos-architecture": "bg-violet-100 text-violet-800",
+  "tango-pedagogy": "bg-rose-100 text-rose-800",
+  "ttc-board": "bg-orange-100 text-orange-800",
+  "neil-outreach": "bg-amber-100 text-amber-800",
+  "it-consulting": "bg-blue-100 text-blue-800",
+  "music-production": "bg-purple-100 text-purple-800",
+  "brain-protocol": "bg-teal-100 text-teal-800",
+  personal: "bg-green-100 text-green-800",
+};
+
+export const BRAIN_DOMAIN_LABELS: Record<string, string> = {
+  "ecos-architecture": "ECOS Arch",
+  "tango-pedagogy": "Tango",
+  "ttc-board": "TTC",
+  "neil-outreach": "Neil",
+  "it-consulting": "IT",
+  "music-production": "Music",
+  "brain-protocol": "BRAIN",
+  personal: "Personal",
+};

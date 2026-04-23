@@ -1,4 +1,4 @@
-import { supabase, Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
+import { supabase, Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS, STAGE_COLORS } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 export default async function ContactDetailPage({ params }: { params: { id: string } }) {
@@ -30,7 +30,7 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
       .select("id, observation_type, content, confidence, domain_context, observed_at, linked_thought_id")
       .eq("contact_id", params.id)
       .order("observed_at", { ascending: false })
-      .limit(20),
+      .limit(50),
   ]);
 
   if (contactRes.error || !contactRes.data) notFound();
@@ -42,13 +42,15 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
   const snapshot = snapshotRes.data as PersonSnapshot | null;
   const observations = (observationsRes.data ?? []) as PersonObservation[];
 
-  const STAGE_COLORS: Record<string, string> = {
-    prospect: "bg-gray-100 text-gray-700",
-    qualified: "bg-blue-100 text-blue-800",
-    proposal: "bg-purple-100 text-purple-800",
-    closed_won: "bg-green-100 text-green-800",
-    closed_lost: "bg-red-100 text-red-800",
-  };
+  const daysSinceSnap = snapshot
+    ? Math.floor((Date.now() - new Date(snapshot.created_at).getTime()) / 86400000)
+    : null;
+  const newObsSince = snapshot
+    ? observations.length - (snapshot.source_observation_ids?.length ?? 0)
+    : null;
+  const snapshotStale = snapshot
+    ? (daysSinceSnap! > 30 || (newObsSince ?? 0) >= 5)
+    : false;
 
   return (
     <div className="max-w-4xl">
@@ -161,11 +163,16 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
 
       {/* Person Card */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-        <h2 className="font-semibold mb-3 flex items-center gap-2">
+        <h2 className="font-semibold mb-3 flex items-center gap-2 flex-wrap">
           <span className="text-indigo-500">◈</span> Person Card
           {snapshot && (
             <span className="text-xs text-gray-400 font-normal">
               v{snapshot.version} · {new Date(snapshot.created_at).toLocaleDateString()} · {snapshot.compiled_by}
+            </span>
+          )}
+          {snapshotStale && (
+            <span className="text-xs text-amber-500 font-medium">
+              · {newObsSince! > 0 ? `${newObsSince} new obs` : `${daysSinceSnap}d old`} · refresh needed
             </span>
           )}
         </h2>

@@ -43,15 +43,26 @@ function formatDayLabel(dateStr: string): string {
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-export default async function BriefingsPage() {
+const BRIEFING_TYPES = ["morning", "checkin", "evening", "weekly_review", "pre_meeting", "habit_reminder", "custom"] as const;
+
+export default async function BriefingsPage({
+  searchParams,
+}: {
+  searchParams: { type?: string };
+}) {
+  const activeType = searchParams?.type;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 14);
 
-  const { data: briefings, error } = await supabase
+  let query = supabase
     .from("life_engine_briefings")
     .select("id, briefing_type, content, delivered_via, user_responded, created_at")
     .gte("created_at", cutoff.toISOString())
     .order("created_at", { ascending: false });
+
+  if (activeType) query = query.eq("briefing_type", activeType);
+
+  const { data: briefings, error } = await query;
 
   if (error) {
     return <p className="text-red-600">Error: {error.message}</p>;
@@ -72,9 +83,28 @@ export default async function BriefingsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Briefings</h1>
         <span className="text-sm text-gray-500">Last 14 days · {all.length} total · {responseRate}% responded</span>
+      </div>
+
+      {/* Type filter */}
+      <div className="flex gap-2 flex-wrap mb-6">
+        <a
+          href="/briefings"
+          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${!activeType ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+        >
+          All
+        </a>
+        {BRIEFING_TYPES.map((t) => (
+          <a
+            key={t}
+            href={`/briefings?type=${t}`}
+            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${activeType === t ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+          >
+            {BRIEFING_LABELS[t] ?? t}
+          </a>
+        ))}
       </div>
 
       {/* Stats */}

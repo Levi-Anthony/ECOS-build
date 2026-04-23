@@ -17,6 +17,7 @@ export default function RootLayout({
         <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6">
           <span className="font-semibold text-gray-900 tracking-tight">ECOS</span>
           <a href="/" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Contacts</a>
+          <a href="/people" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">People</a>
           <a href="/brain" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">BRAIN</a>
           <a href="/it" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">IT</a>
           <a href="/follow-ups" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Follow-ups</a>

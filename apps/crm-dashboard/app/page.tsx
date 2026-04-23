@@ -1,5 +1,6 @@
 import { supabase, Contact, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
 
+
 function isFollowUpSoon(date: string | null): boolean {
   if (!date) return false;
   const followUp = new Date(date);
@@ -27,7 +28,15 @@ export default async function ContactsPage({
 
   if (domain) query = query.eq("relationship_domain", domain);
 
-  const { data: contacts, error } = await query;
+  const [{ data: contacts, error }, { data: obsRows }] = await Promise.all([
+    query,
+    supabase.from("person_observations").select("contact_id"),
+  ]);
+
+  const obsCountMap: Record<string, number> = {};
+  for (const row of obsRows ?? []) {
+    obsCountMap[row.contact_id] = (obsCountMap[row.contact_id] ?? 0) + 1;
+  }
 
   const domains = ["tango", "ttc", "outreach", "it", "music", "personal", "general"];
 
@@ -80,17 +89,32 @@ export default async function ContactsPage({
               return (
                 <tr
                   key={contact.id}
-                  className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${overdue ? "bg-red-50 hover:bg-red-100" : followUpSoon ? "bg-amber-50 hover:bg-amber-100" : ""}`}
+                  className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${contact.administrative_status === "administrative_closed" ? "opacity-40" : ""} ${overdue ? "bg-red-50 hover:bg-red-100" : followUpSoon ? "bg-amber-50 hover:bg-amber-100" : ""}`}
                 >
                   <td className="px-4 py-3">
-                    <a href={`/contacts/${contact.id}`} className="font-medium text-blue-600 hover:text-blue-800">
-                      {contact.name}
-                    </a>
-                    {Array.isArray(contact.thought_links) && contact.thought_links.length > 0 && (
-                      <span className="ml-2 text-xs text-purple-500" title={`${contact.thought_links.length} BRAIN link(s)`}>
-                        ◆{contact.thought_links.length}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      <a href={`/contacts/${contact.id}`} className="font-medium text-blue-600 hover:text-blue-800">
+                        {contact.name}
+                      </a>
+                      {Array.isArray(contact.thought_links) && contact.thought_links.length > 0 && (
+                        <a
+                          href={`/brain?q=${encodeURIComponent(contact.name)}`}
+                          className="text-xs text-purple-500 hover:text-purple-700"
+                          title={`${contact.thought_links.length} BRAIN link(s) — search BRAIN`}
+                        >
+                          ◆{contact.thought_links.length}
+                        </a>
+                      )}
+                      {obsCountMap[contact.id] > 0 && (
+                        <a
+                          href={`/contacts/${contact.id}#observations`}
+                          className="text-xs text-emerald-500 hover:text-emerald-700"
+                          title={`${obsCountMap[contact.id]} observation(s)`}
+                        >
+                          ◉{obsCountMap[contact.id]}
+                        </a>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {contact.company && <span>{contact.company}</span>}
