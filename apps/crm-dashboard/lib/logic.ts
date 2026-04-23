@@ -80,7 +80,7 @@ export function aggregateLastService(
 }
 
 export function aggregateUnbilled(
-  rows: { contact_id: string; time_spent_minutes: number | null }[]
+  rows: { contact_id: string; time_spent_minutes?: number | null }[]
 ): Record<string, { count: number; totalMin: number }> {
   const map: Record<string, { count: number; totalMin: number }> = {};
   for (const row of rows) {

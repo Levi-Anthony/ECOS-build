@@ -103,6 +103,26 @@ describe("aggregateUnbilled", () => {
     });
   });
 
+  it("treats undefined time_spent_minutes as 0 (ServiceLog optional field)", () => {
+    const rows = [
+      { contact_id: "a", time_spent_minutes: undefined },
+      { contact_id: "a", time_spent_minutes: 45 },
+    ];
+    expect(aggregateUnbilled(rows)).toEqual({
+      a: { count: 2, totalMin: 45 },
+    });
+  });
+
+  it("treats missing time_spent_minutes key as 0", () => {
+    const rows = [
+      { contact_id: "a" },
+      { contact_id: "a", time_spent_minutes: 60 },
+    ];
+    expect(aggregateUnbilled(rows)).toEqual({
+      a: { count: 2, totalMin: 60 },
+    });
+  });
+
   it("all-null minutes produces totalMin of 0", () => {
     const rows = [
       { contact_id: "x", time_spent_minutes: null },
