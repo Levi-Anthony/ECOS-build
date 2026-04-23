@@ -1,4 +1,5 @@
 import { supabase, DOMAIN_COLORS, DOMAIN_LABELS, STAGE_COLORS, BRAIN_DOMAIN_COLORS, BRAIN_DOMAIN_LABELS, Briefing } from "@/lib/supabase";
+import { relativeAge, weekLabel, aggregateUnbilled } from "@/lib/logic";
 
 const BRAIN_DOMAINS = [
   "ecos-architecture",
@@ -11,22 +12,6 @@ const BRAIN_DOMAINS = [
   "personal",
 ];
 
-function relativeAge(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffH = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffH < 1) return "just now";
-  if (diffH < 24) return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  return `${diffD}d ago`;
-}
-
-function weekLabel(): string {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 6);
-  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  return `${fmt(start)} – ${fmt(end)}`;
-}
 
 export default async function WeeklyPage() {
   const now = new Date();
@@ -97,12 +82,7 @@ export default async function WeeklyPage() {
   const staleDomains = BRAIN_DOMAINS.filter((d) => !domainCounts[d]);
 
   // IT unbilled aggregation
-  const unbilledByContact: Record<string, { count: number; totalMin: number }> = {};
-  for (const log of unbilledLogs ?? []) {
-    if (!unbilledByContact[log.contact_id]) unbilledByContact[log.contact_id] = { count: 0, totalMin: 0 };
-    unbilledByContact[log.contact_id].count++;
-    unbilledByContact[log.contact_id].totalMin += log.time_spent_minutes ?? 0;
-  }
+  const unbilledByContact = aggregateUnbilled(unbilledLogs ?? []);
   const totalUnbilledMin = (unbilledLogs ?? []).reduce((s, l) => s + (l.time_spent_minutes ?? 0), 0);
   const unbilledContactIds = Object.keys(unbilledByContact);
   let unbilledContactNames: Record<string, string> = {};

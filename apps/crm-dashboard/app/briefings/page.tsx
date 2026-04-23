@@ -1,4 +1,5 @@
 import { supabase, Briefing } from "@/lib/supabase";
+import { formatTime, formatDayLabel } from "@/lib/logic";
 
 const BRIEFING_COLORS: Record<string, string> = {
   morning: "bg-amber-100 text-amber-800",
@@ -30,18 +31,6 @@ const BRIEFING_LABELS: Record<string, string> = {
   custom: "Custom",
 };
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  // MST = UTC-7 (Arizona never observes DST)
-  const mst = new Date(d.getTime() - 7 * 60 * 60 * 1000);
-  return mst.toISOString().slice(11, 16);
-}
-
-function formatDayLabel(dateStr: string): string {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  const d = new Date(year, month - 1, day);
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-}
 
 const BRIEFING_TYPES = ["morning", "checkin", "evening", "weekly_review", "pre_meeting", "habit_reminder", "custom"] as const;
 

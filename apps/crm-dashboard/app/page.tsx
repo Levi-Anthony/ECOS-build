@@ -1,18 +1,5 @@
 import { supabase, Contact, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
-
-
-function isFollowUpSoon(date: string | null): boolean {
-  if (!date) return false;
-  const followUp = new Date(date);
-  const threshold = new Date();
-  threshold.setDate(threshold.getDate() + 7);
-  return followUp <= threshold;
-}
-
-function isOverdue(date: string | null): boolean {
-  if (!date) return false;
-  return new Date(date) < new Date();
-}
+import { isFollowUpSoon, isOverdue, aggregateObsCounts } from "@/lib/logic";
 
 export default async function ContactsPage({
   searchParams,
@@ -33,10 +20,7 @@ export default async function ContactsPage({
     supabase.from("person_observations").select("contact_id"),
   ]);
 
-  const obsCountMap: Record<string, number> = {};
-  for (const row of obsRows ?? []) {
-    obsCountMap[row.contact_id] = (obsCountMap[row.contact_id] ?? 0) + 1;
-  }
+  const obsCountMap = aggregateObsCounts(obsRows ?? []);
 
   const domains = ["tango", "ttc", "outreach", "it", "music", "personal", "general"];
 

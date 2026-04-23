@@ -1,6 +1,5 @@
 import { supabase, DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
-
-type IntelStatus = "unseeded" | "needs_snap" | "stale" | "current";
+import { relativeAge, computeIntelStatus, computeStaleness, type IntelStatus, type ObsAgg, type SnapInfo } from "@/lib/logic";
 
 const STATUS_CHIP: Record<IntelStatus, string> = {
   unseeded: "bg-gray-100 text-gray-500",
@@ -16,14 +15,6 @@ const STATUS_LABEL: Record<IntelStatus, string> = {
   current: "Current",
 };
 
-function relativeAge(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffH = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffH < 1) return "just now";
-  if (diffH < 24) return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  return `${diffD}d ago`;
-}
 
 export default async function PeoplePage({
   searchParams,
@@ -48,14 +39,6 @@ export default async function PeoplePage({
 
   const contacts = contactsRes.data ?? [];
 
-  // Aggregate observations per contact
-  type ObsAgg = {
-    total: number;
-    lastObserved: string;
-    facts: number;
-    interpretations: number;
-    strategies: number;
-  };
   const obsMap: Record<string, ObsAgg> = {};
   for (const row of obsRes.data ?? []) {
     if (!obsMap[row.contact_id]) {
@@ -69,8 +52,6 @@ export default async function PeoplePage({
     if (row.observation_type === "strategy") agg.strategies++;
   }
 
-  // Index snapshots
-  type SnapInfo = { version: number; created_at: string; obsAtCompile: number };
   const snapMap: Record<string, SnapInfo> = {};
   for (const row of snapRes.data ?? []) {
     snapMap[row.contact_id] = {
@@ -80,26 +61,12 @@ export default async function PeoplePage({
     };
   }
 
-  // Compute per-contact intel status
   const enriched = contacts.map((c) => {
     const obs = obsMap[c.id];
     const snap = snapMap[c.id];
-
-    let status: IntelStatus;
-    let daysSinceSnap: number | null = null;
-    let newObsSince: number | null = null;
-
-    if (!obs) {
-      status = "unseeded";
-    } else if (!snap) {
-      status = "needs_snap";
-    } else {
-      daysSinceSnap = Math.floor((Date.now() - new Date(snap.created_at).getTime()) / 86400000);
-      newObsSince = obs.total - snap.obsAtCompile;
-      status = (daysSinceSnap > 30 || newObsSince >= 5) ? "stale" : "current";
-    }
-
-    return { ...c, obs, snap, status, daysSinceSnap, newObsSince };
+    const status = computeIntelStatus(obs, snap);
+    const staleness = obs && snap ? computeStaleness(snap, obs.total) : null;
+    return { ...c, obs, snap, status, daysSinceSnap: staleness?.daysSince ?? null, newObsSince: staleness?.newObsSince ?? null };
   });
 
   // Filter

@@ -1,4 +1,5 @@
 import { supabase, Contact, ServiceLog } from "@/lib/supabase";
+import { aggregateLastService, aggregateUnbilled } from "@/lib/logic";
 
 export default async function ITPage() {
   const [clientsRes, unbilledRes, lastServiceRes] = await Promise.all([
@@ -21,21 +22,9 @@ export default async function ITPage() {
 
   const clients = (clientsRes.data ?? []) as Contact[];
   const unbilledLogs = (unbilledRes.data ?? []) as ServiceLog[];
+  const lastServiceByContact = aggregateLastService(lastServiceRes.data ?? []);
 
-  const lastServiceByContact: Record<string, string> = {};
-  for (const row of lastServiceRes.data ?? []) {
-    if (!lastServiceByContact[row.contact_id]) {
-      lastServiceByContact[row.contact_id] = row.service_date;
-    }
-  }
-
-  // Aggregate unbilled time per contact
-  const unbilledByContact: Record<string, { count: number; totalMin: number }> = {};
-  for (const log of unbilledLogs) {
-    if (!unbilledByContact[log.contact_id]) unbilledByContact[log.contact_id] = { count: 0, totalMin: 0 };
-    unbilledByContact[log.contact_id].count++;
-    unbilledByContact[log.contact_id].totalMin += log.time_spent_minutes ?? 0;
-  }
+  const unbilledByContact = aggregateUnbilled(unbilledLogs);
 
   const totalUnbilledMin = unbilledLogs.reduce((sum, l) => sum + (l.time_spent_minutes ?? 0), 0);
   const clientsWithUnbilled = Object.keys(unbilledByContact).length;
