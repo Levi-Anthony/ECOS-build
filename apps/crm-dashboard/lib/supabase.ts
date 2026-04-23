@@ -42,7 +42,7 @@ export type Opportunity = {
   title: string;
   stage: string;
   value: number | null;
-  expected_close_date: string | null;
+  close_date: string | null;
   notes: string | null;
   created_at: string;
 };
@@ -119,8 +119,10 @@ export type PersonObservation = {
   confidence: number;
   domain_context: string | null;
   observed_at: string;
+  source: string;
   linked_thought_id: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type PersonSnapshot = {
@@ -128,6 +130,8 @@ export type PersonSnapshot = {
   contact_id: string;
   snapshot_content: string;
   domains_covered: string[];
+  source_observation_ids: string[];
+  source_thought_ids: string[];
   compiled_by: string;
   version: number;
   is_current: boolean;

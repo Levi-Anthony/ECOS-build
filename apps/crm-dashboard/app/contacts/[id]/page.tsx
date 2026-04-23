@@ -16,7 +16,7 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
       .limit(30),
     supabase
       .from("opportunities")
-      .select("id, title, stage, value, expected_close_date, notes")
+      .select("id, title, stage, value, close_date, notes")
       .eq("contact_id", params.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -131,7 +131,7 @@ export default async function ContactDetailPage({ params }: { params: { id: stri
                 </div>
                 <div className="flex items-center gap-3 text-sm">
                   {opp.value && <span className="text-gray-600">${opp.value.toLocaleString()}</span>}
-                  {opp.expected_close_date && <span className="text-gray-500">{opp.expected_close_date}</span>}
+                  {opp.close_date && <span className="text-gray-500">{opp.close_date}</span>}
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_COLORS[opp.stage] ?? "bg-gray-100 text-gray-700"}`}>
                     {opp.stage.replace("_", " ")}
                   </span>
