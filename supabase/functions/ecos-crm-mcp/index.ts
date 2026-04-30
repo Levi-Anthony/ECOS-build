@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 
@@ -193,7 +194,7 @@ server.registerTool(
           .limit(20),
         supabase
           .from("opportunities")
-          .select("id, title, stage, value, expected_close_date, notes")
+          .select("id, title, stage, value, close_date, notes")
           .eq("contact_id", contact_id)
           .not("stage", "in", '("closed_won","closed_lost")')
           .order("created_at", { ascending: false }),
@@ -217,7 +218,7 @@ server.registerTool(
       if (oppsRes.data?.length) {
         lines.push("--- Open Opportunities ---");
         for (const o of oppsRes.data) {
-          lines.push(`• [${o.stage}] ${o.title}${o.value ? ` ($${o.value})` : ""}${o.expected_close_date ? ` — closes ${o.expected_close_date}` : ""}`);
+          lines.push(`• [${o.stage}] ${o.title}${o.value ? ` ($${o.value})` : ""}${o.close_date ? ` — closes ${o.close_date}` : ""}`);
         }
         lines.push("");
       }
@@ -249,11 +250,11 @@ server.registerTool(
       title: z.string().describe("Opportunity title"),
       stage: z.enum(OPPORTUNITY_STAGES).optional().default("prospect"),
       value: z.number().optional().describe("Estimated value in dollars"),
-      expected_close_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
+      close_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
       notes: z.string().optional(),
     },
   },
-  async ({ contact_id, title, stage, value, expected_close_date, notes }) => {
+  async ({ contact_id, title, stage, value, close_date, notes }) => {
     try {
       const { data, error } = await supabase
         .from("opportunities")
@@ -263,7 +264,7 @@ server.registerTool(
           title,
           stage: stage ?? "prospect",
           value: value ?? null,
-          expected_close_date: expected_close_date ?? null,
+          close_date: close_date ?? null,
           notes: notes ?? null,
         })
         .select("id, title, stage")
@@ -514,9 +515,9 @@ server.registerTool(
           .order("follow_up_date", { ascending: true }),
         supabase
           .from("opportunities")
-          .select("id, title, stage, value, expected_close_date, contact_id")
+          .select("id, title, stage, value, close_date, contact_id")
           .not("stage", "in", '("closed_won","closed_lost")')
-          .order("expected_close_date", { ascending: true }),
+          .order("close_date", { ascending: true }),
         supabase
           .from("contact_interactions")
           .select("contact_id, interaction_type, summary, occurred_at, professional_contacts!inner(relationship_domain, name)")
@@ -548,7 +549,7 @@ server.registerTool(
         const byStage: Record<string, typeof opps> = {};
         for (const o of opps) byStage[o.stage] = [...(byStage[o.stage] ?? []), o];
         for (const [stage, items] of Object.entries(byStage)) {
-          lines.push(`${stage} (${items.length}): ${items.map((o: {title: string; value?: number; expected_close_date?: string}) => `${o.title}${o.value ? ` $${o.value}` : ""}${o.expected_close_date ? ` [${o.expected_close_date}]` : ""}`).join(" | ")}`);
+          lines.push(`${stage} (${items.length}): ${items.map((o: {title: string; value?: number; close_date?: string}) => `${o.title}${o.value ? ` $${o.value}` : ""}${o.close_date ? ` [${o.close_date}]` : ""}`).join(" | ")}`);
         }
       }
       lines.push("");
@@ -1060,6 +1061,13 @@ server.registerTool(
 
 // --- Hono App with Auth Check ---
 const app = new Hono();
+
+app.use("*", cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "OPTIONS", "DELETE"],
+  allowHeaders: ["Content-Type", "x-brain-key", "Authorization", "mcp-session-id"],
+  maxAge: 86400,
+}));
 
 app.all("*", async (c) => {
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
