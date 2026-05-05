@@ -19,6 +19,7 @@ export default function RootLayout({
           <a href="/" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Contacts</a>
           <a href="/people" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">People</a>
           <a href="/brain" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">BRAIN</a>
+          <a href="/taste" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Taste</a>
           <a href="/it" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">IT</a>
           <a href="/follow-ups" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Follow-ups</a>
           <a href="/weekly" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Weekly</a>

@@ -342,12 +342,12 @@ server.registerTool(
       const embedding = await getEmbedding(storedContent);
       const { error } = await supabase.from("thoughts").insert({
         content: storedContent,
+        original_content: content,
         embedding,
         metadata: {
           ...meta,
           source: "mcp",
           ...(isFallback ? { metadata_fallback: true } : {}),
-          ...(storedContent !== content ? { original_content: content } : {}),
         },
       });
       if (error) {
@@ -398,7 +398,7 @@ server.registerTool(
       // Fetch current entry
       const { data: existing, error: fetchErr } = await supabase
         .from("thoughts")
-        .select("id, content, embedding, metadata")
+        .select("id, content, original_content, embedding, metadata")
         .eq("id", id)
         .single();
       if (fetchErr || !existing) {
@@ -414,6 +414,7 @@ server.registerTool(
       const { error: archiveErr } = await supabase.from("thought_history").insert({
         original_thought_id: id,
         content: existing.content,
+        original_content: existing.original_content ?? existing.content,
         embedding: existing.embedding,
         type: oldMeta.type ?? null,
         topics: Array.isArray(oldMeta.topics) ? oldMeta.topics : [],
@@ -429,19 +430,31 @@ server.registerTool(
         };
       }
 
-      // Re-embed and re-extract metadata for new content
-      const [newEmbedding, newMetadata] = await Promise.all([
-        getEmbedding(content),
-        extractMetadata(content),
-      ]);
+      // Re-extract metadata; storedContent uses rewrite if produced, else input.
+      // Mirrors capture_thought semantic: original_content always = user input.
+      const newMetadata = await extractMetadata(content);
+      const newMeta = newMetadata as Record<string, unknown>;
+      const isFallback = !!newMeta._fallback;
+      delete newMeta._fallback;
+      const storedContent = (newMeta.rewritten_content as string)?.trim() || content;
+      delete newMeta.rewritten_content;
+      const needsSplit = !!newMeta.needs_split;
+      if (!needsSplit) delete newMeta.needs_split;
+      const newEmbedding = await getEmbedding(storedContent);
 
       // Update the thought
       const { error: updateErr } = await supabase
         .from("thoughts")
         .update({
-          content,
+          content: storedContent,
+          original_content: content,
           embedding: newEmbedding,
-          metadata: { ...(newMetadata as Record<string, unknown>), source: oldMeta.source ?? "mcp" },
+          metadata: {
+            ...newMeta,
+            source: oldMeta.source ?? "mcp",
+            ...(needsSplit ? { needs_split: true } : {}),
+            ...(isFallback ? { metadata_fallback: true } : {}),
+          },
         })
         .eq("id", id);
       if (updateErr) {
@@ -482,7 +495,7 @@ server.registerTool(
       // Fetch current entry before deletion
       const { data: existing, error: fetchErr } = await supabase
         .from("thoughts")
-        .select("id, content, embedding, metadata")
+        .select("id, content, original_content, embedding, metadata")
         .eq("id", id)
         .single();
       if (fetchErr || !existing) {
@@ -498,6 +511,7 @@ server.registerTool(
       const { error: archiveErr } = await supabase.from("thought_history").insert({
         original_thought_id: id,
         content: existing.content,
+        original_content: existing.original_content ?? existing.content,
         embedding: existing.embedding,
         type: oldMeta.type ?? null,
         topics: Array.isArray(oldMeta.topics) ? oldMeta.topics : [],

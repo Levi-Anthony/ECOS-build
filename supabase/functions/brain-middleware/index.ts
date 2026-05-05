@@ -82,6 +82,7 @@ Return only the JSON object.`,
 async function archiveToHistory(
   id: string,
   content: string,
+  original_content: string,
   embedding: unknown,
   metadata: Record<string, unknown>,
   reason: "updated" | "deleted"
@@ -89,6 +90,7 @@ async function archiveToHistory(
   const { error } = await supabase.from("thought_history").insert({
     original_thought_id: id,
     content,
+    original_content,
     embedding,
     type: metadata.type ?? null,
     topics: Array.isArray(metadata.topics) ? metadata.topics : [],
@@ -145,13 +147,13 @@ app.post("*/capture", async (c: Context) => {
       .from("thoughts")
       .insert({
         content: storedContent,
+        original_content: content,
         embedding,
         metadata: {
           ...meta,
           source: source ?? "shortcut",
           ...(needsSplit ? { needs_split: true } : {}),
           ...(isFallback ? { metadata_fallback: true } : {}),
-          ...(storedContent !== content ? { original_content: content } : {}),
         },
       })
       .select("id")
@@ -249,7 +251,7 @@ app.put("*/edit", async (c: Context) => {
 
     const { data: existing, error: fetchErr } = await supabase
       .from("thoughts")
-      .select("id, content, embedding, metadata")
+      .select("id, content, original_content, embedding, metadata")
       .eq("id", id)
       .single();
 
@@ -258,23 +260,34 @@ app.put("*/edit", async (c: Context) => {
     }
 
     const archiveErr = await archiveToHistory(
-      id, existing.content, existing.embedding,
+      id, existing.content, existing.original_content ?? existing.content, existing.embedding,
       (existing.metadata || {}) as Record<string, unknown>, "updated"
     );
     if (archiveErr) return c.json({ error: `Archive failed: ${archiveErr}` }, 500);
 
-    const [newEmbedding, newMetadata] = await Promise.all([
-      getEmbedding(content),
-      extractMetadata(content),
-    ]);
+    const newMetadata = await extractMetadata(content);
+    const newMeta = newMetadata as Record<string, unknown>;
+    const isFallback = !!newMeta._fallback;
+    delete newMeta._fallback;
+    const storedContent = (newMeta.rewritten_content as string)?.trim() || content;
+    delete newMeta.rewritten_content;
+    const needsSplit = !!newMeta.needs_split;
+    if (!needsSplit) delete newMeta.needs_split;
+    const newEmbedding = await getEmbedding(storedContent);
 
     const oldMeta = (existing.metadata || {}) as Record<string, unknown>;
     const { error: updateErr } = await supabase
       .from("thoughts")
       .update({
-        content,
+        content: storedContent,
+        original_content: content,
         embedding: newEmbedding,
-        metadata: { ...(newMetadata as Record<string, unknown>), source: oldMeta.source ?? "mcp" },
+        metadata: {
+          ...newMeta,
+          source: oldMeta.source ?? "mcp",
+          ...(needsSplit ? { needs_split: true } : {}),
+          ...(isFallback ? { metadata_fallback: true } : {}),
+        },
       })
       .eq("id", id);
 
@@ -298,7 +311,7 @@ app.delete("*/delete", async (c: Context) => {
 
     const { data: existing, error: fetchErr } = await supabase
       .from("thoughts")
-      .select("id, content, embedding, metadata")
+      .select("id, content, original_content, embedding, metadata")
       .eq("id", id)
       .single();
 
@@ -307,7 +320,7 @@ app.delete("*/delete", async (c: Context) => {
     }
 
     const archiveErr = await archiveToHistory(
-      id, existing.content, existing.embedding,
+      id, existing.content, existing.original_content ?? existing.content, existing.embedding,
       (existing.metadata || {}) as Record<string, unknown>, "deleted"
     );
     if (archiveErr) return c.json({ error: `Archive failed: ${archiveErr}` }, 500);

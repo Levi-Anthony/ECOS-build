@@ -27,11 +27,11 @@ entrypoint = "./functions/open-brain-mcp/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/open-brain-mcp/*.html" ]
 
-[functions.ecos-crm-mcp]
+[functions.ecos-mcp]
 enabled = true
 verify_jwt = false
-import_map = "./functions/ecos-crm-mcp/deno.json"
-entrypoint = "./functions/ecos-crm-mcp/index.ts"
+import_map = "./functions/ecos-mcp/deno.json"
+entrypoint = "./functions/ecos-mcp/index.ts"
 
 [functions.quick-capture]
 enabled = false

@@ -56,6 +56,7 @@ export type ThoughtLink = {
 export type Thought = {
   id: string;
   content: string;
+  original_content: string;
   created_at: string;
   status: string;
   retrieval_count: number;
@@ -71,6 +72,7 @@ export type Thought = {
     action_items?: string[];
     needs_split?: boolean;
     metadata_fallback?: boolean;
+    taste_preference_id?: string;
   };
 };
 
@@ -108,6 +110,39 @@ export type Briefing = {
   content: string;
   delivered_via: string;
   user_responded: boolean;
+  created_at: string;
+};
+
+export type TastePreference = {
+  id: string;
+  user_id: string;
+  preference_name: string | null;
+  domain: string | null;
+  reject: string | null;
+  want: string | null;
+  type_label: string | null;
+  constraint_type: string | null;
+  constraint_text: string;
+  source: string | null;
+  contact_id: string | null;
+  status: "active" | "archived" | "superseded";
+  invocation_count: number | null;
+  last_invoked_at: string | null;
+  user_responded: boolean | null;
+  thought_id: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export type TasteEvolution = {
+  id: string;
+  taste_id: string;
+  change_type: "upgraded" | "downgraded" | "refined" | "archived";
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  approved: boolean;
+  applied_at: string | null;
   created_at: string;
 };
 

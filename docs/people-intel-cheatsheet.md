@@ -1,5 +1,5 @@
 # People-Intelligence Tools — Cheat Sheet
-*Tools 18–22 · ecos-crm-mcp · Deployed 2026-04-22*
+*Tools 18–22 · ecos-mcp · Deployed 2026-04-22 (server renamed from ecos-crm-mcp 2026-05-04)*
 
 ---
 

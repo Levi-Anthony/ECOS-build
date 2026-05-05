@@ -21,7 +21,7 @@ const DOMAIN_COLORS: Record<string, string> = {
 export default async function ThoughtDetailPage({ params }: { params: { id: string } }) {
   const { data, error } = await supabase
     .from("thoughts")
-    .select("id, content, created_at, status, retrieval_count, source_id, metadata")
+    .select("id, content, original_content, created_at, status, retrieval_count, source_id, metadata")
     .eq("id", params.id)
     .single();
 
@@ -29,6 +29,7 @@ export default async function ThoughtDetailPage({ params }: { params: { id: stri
 
   const thought = data as Thought;
   const meta = thought.metadata ?? {};
+  const wasRewritten = thought.original_content && thought.original_content !== thought.content;
 
   return (
     <div className="max-w-3xl">
@@ -69,7 +70,20 @@ export default async function ThoughtDetailPage({ params }: { params: { id: stri
           </div>
         </div>
 
-        <p className="text-gray-900 text-base leading-relaxed whitespace-pre-wrap">{thought.content}</p>
+        {wasRewritten ? (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-xs text-gray-500 uppercase tracking-wide mb-1">As captured</h3>
+              <p className="text-gray-900 text-base leading-relaxed whitespace-pre-wrap">{thought.original_content}</p>
+            </div>
+            <div className="border-t border-gray-100 pt-4">
+              <h3 className="text-xs text-gray-500 uppercase tracking-wide mb-1">As stored / searched</h3>
+              <p className="text-gray-700 text-base leading-relaxed whitespace-pre-wrap">{thought.content}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-gray-900 text-base leading-relaxed whitespace-pre-wrap">{thought.content}</p>
+        )}
       </div>
 
       {/* Metadata */}

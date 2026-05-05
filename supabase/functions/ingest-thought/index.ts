@@ -77,6 +77,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const { error } = await supabase.from("thoughts").insert({
       content: messageText,
+      original_content: messageText,
       embedding,
       metadata: { ...metadata, source: "slack", slack_ts: messageTs },
     });
