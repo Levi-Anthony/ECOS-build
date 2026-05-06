@@ -165,7 +165,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       title: "Create Artifact",
       description:
         "Create a canonical artifact with its first version and run the chunking pipeline. authority_level defaults to 'draft' — agent-written artifacts must be explicitly approved via approve_artifact before becoming active instructions (current_version_id is set only on approval).",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         title:           z.string().describe("Artifact title"),
         doc_type:        z.enum(["prompt","template","checklist","prd","spec","sop","playbook","agent_context","agent_handoff","agent_instruction","runtime_policy","repo_context"]),
@@ -286,7 +285,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Get Artifact",
       description: "Retrieve a canonical artifact with version history and (optionally) the current approved body. If no version is approved yet, returns the latest draft body.",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         artifact_id:  z.string().uuid(),
         include_body: z.boolean().optional().default(true).describe("Include full document body (default true)"),
@@ -366,7 +364,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       title: "Search Artifacts",
       description:
         "Semantic search across artifact chunks. Defaults to current approved complete versions only — safe for agent instruction retrieval. Set include_drafts=true for draft review. Returns chunk pointers with artifact metadata and provenance.",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         query:           z.string().describe("What to search for"),
         limit:           z.number().int().min(1).max(50).optional().default(10),
@@ -425,7 +422,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "List Artifacts",
       description: "List canonical artifacts with optional filters. Returns headers with version/approval status.",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         doc_type:        z.string().optional(),
         scope:           z.string().optional(),
@@ -475,7 +471,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       title: "Update Artifact",
       description:
         "Create a new draft version of an existing artifact with updated content. Re-chunks the new version. Does NOT update current_version_id — the existing approved version remains active. Call approve_artifact to promote the new version.",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         artifact_id:  z.string().uuid(),
         body:         z.string().describe("New full document content"),
@@ -564,7 +559,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       title: "Approve Artifact",
       description:
         "Approve a specific artifact version and set it as the active current version. Requires new_authority_level — no default. Previous current version is marked superseded. Only approved complete versions are returned by search_artifacts by default.",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         artifact_id:         z.string().uuid(),
         version_id:          z.string().uuid().describe("The version to approve and make current"),
@@ -645,7 +639,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Link Artifact",
       description: "Link a canonical artifact to a related thought, contact, entity, or opportunity. Builds provenance chains. Use relationship_type 'governs' for instruction artifacts that constrain other records.",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         artifact_id:       z.string().uuid(),
         linked_type:       z.enum(["thought","contact","entity","opportunity"]),

@@ -29,14 +29,13 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       title: "Add Entity",
       description:
         "Create a new entity — organization, governance body, domain, project, person, asset, etc. Use when a non-contact entity needs to be tracked and linked to thoughts, artifacts, or contacts.",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         name:        z.string().describe("Entity name"),
         entity_type: z.enum(ENTITY_TYPES).describe("person | organization | governance_body | domain | project | team | faction | artifact | asset | client_account | software | hardware | service_environment | location | event | book"),
         description: z.string().optional().describe("Short description of what this entity is"),
         aliases:     z.array(z.string()).optional().describe("Alternative names or abbreviations"),
         tags:        z.array(z.string()).optional(),
-        metadata:    z.record(z.unknown()).optional().describe("Additional structured fields"),
+        metadata:    z.record(z.string(), z.unknown()).optional().describe("Additional structured fields"),
       },
     },
     async ({ name, entity_type, description, aliases, tags, metadata }) => {
@@ -80,7 +79,6 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       title: "Search Entities",
       description:
         "Search entities by name or description substring. Returns active entities by default. Optionally filter by entity_type. Use to look up organizations, governance bodies, domains, projects, and other non-person entities.",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         query:       z.string().describe("Name or description to match"),
         entity_type: z.enum(ENTITY_TYPES).optional().describe("Filter by type"),
@@ -126,7 +124,6 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       title: "Link Entities",
       description:
         "Create a directed relationship between two entities. Examples: (TTC board member) member_of (TTC), (Levi) governs (ECTango), (ECOS) part_of (BRAIN).",
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         from_entity_id:    z.string().uuid().describe("Source entity ID"),
         to_entity_id:      z.string().uuid().describe("Target entity ID"),
