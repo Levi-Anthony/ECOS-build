@@ -47,7 +47,7 @@ The `constraint_type` CHECK constraint was relaxed (made nullable, free text). L
 
 The Taste Harvest Protocol (see `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/ECOS/ECOS-PROMPTS/brain-capture-protocol.md`) surfaces candidates at session close. On approval, a single MCP tool dual-writes:
 
-1. `mcp__ecos-mcp__capture_taste_preference(preference_name, domain, reject, want, type_label, [contact_id], [source])`
+1. `mcp__ecb__capture_taste_preference(preference_name, domain, reject, want, type_label, [contact_id], [source])`
 2. The tool composes a canonical Prompt-4 string and:
    - Inserts a structured row in `taste_preferences`
    - Inserts a `thoughts` mirror with `metadata.signal_type='taste'`, `metadata.taste_preference_id=<row id>`
@@ -59,7 +59,7 @@ The structured row is authoritative. Future updates go through `update_taste_pre
 
 ## Update flow — every change logged
 
-`mcp__ecos-mcp__update_taste_preference(id, changes, change_type, reason)` is the only path for modifying a taste preference. It:
+`mcp__ecb__update_taste_preference(id, changes, change_type, reason)` is the only path for modifying a taste preference. It:
 
 1. Snapshots the current row (`old_value`)
 2. Applies the patch (`new_value`)

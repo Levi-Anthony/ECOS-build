@@ -120,4 +120,4 @@ Constructs query internally: `[name] [domain?] person notes observations pattern
 1. `search_brain_for_contact` at threshold 0.30
 2. Compare results against `get_person_observations`
 3. Flag duplicate BRAIN entries and entries superseded by newer observations
-4. Update or delete via `mcp__open-brain__update_thought` / `mcp__open-brain__delete_thought`
+4. Update or delete via `mcp__ecb__update_thought` / `mcp__ecb__delete_thought`

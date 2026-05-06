@@ -37,17 +37,17 @@ Verify the structure is intact:
   ls ~/ecos should show: CLAUDE.md, HANDOFF.md, DEPLOY.md, .claude/
   ls -la ~/ecos/.claude/skills/ should show 8 skill directories
 
-STEP 2 — CONFIGURE OPEN BRAIN MCP
+STEP 2 — CONFIGURE ECB MCP
 Ask me for my Supabase URL and access key. Then run:
-  claude mcp add --transport http open-brain \
-    [SUPABASE_URL]/functions/v1/open-brain-mcp \
+  claude mcp add --transport http ecb \
+    [SUPABASE_URL]/functions/v1/ecb-mcp \
     --header "x-brain-key: [ACCESS_KEY]"
 Verify with:
   claude mcp list
-Confirm open-brain appears as active before continuing.
+Confirm ecb appears as active before continuing.
 
 If this fails: the most common cause is a key mismatch or cold function startup.
-Ask me to open Supabase dashboard → Edge Functions → open-brain-mcp → Logs
+Ask me to open Supabase dashboard → Edge Functions → ecb-mcp → Logs
 and paste what I see. Diagnose from there.
 
 STEP 3 — OPEN ECOS
@@ -92,42 +92,61 @@ what you see so I can unblock you.
 
 Set in Supabase Dashboard → Project Settings → Edge Functions → Secrets, or via `supabase secrets set`.
 
-| Variable | Used by | Description |
-|---|---|---|
-| `SUPABASE_URL` | both functions | Your project URL, e.g. `https://xxxx.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | both functions | Service role key (bypasses RLS) — Dashboard → API → service_role |
-| `OPENROUTER_API_KEY` | both functions | OpenRouter API key — used for embeddings (`text-embedding-3-small`) and metadata extraction (`gpt-4o-mini`) |
-| `MCP_ACCESS_KEY` | both functions | Shared secret for all clients — passed as `x-brain-key` header or `?key=` query param |
+| Variable | Description |
+|---|---|
+| `MCP_ACCESS_KEY` | Shared secret for all clients — passed as `x-brain-key` header or `?key=` query param. Required (user-set). |
+| `OPENROUTER_API_KEY` | OpenRouter API key — used for embeddings (`text-embedding-3-small`) and metadata extraction (`gpt-4o-mini`). Required (user-set). |
+| `SUPABASE_URL` | Auto-injected by Supabase Edge Functions runtime. Not user-set. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Auto-injected by Supabase Edge Functions runtime. Not user-set. |
 
 **Deploy commands:**
 ```bash
 cd ~/ecos
-supabase functions deploy open-brain-mcp --no-verify-jwt
+supabase functions deploy ecb-mcp --no-verify-jwt
 supabase functions deploy brain-middleware --no-verify-jwt
-supabase functions deploy ecos-mcp --no-verify-jwt
+supabase functions deploy ingest-thought
 ```
 
-Note: `--no-verify-jwt` is required for all functions. Auth is handled by `MCP_ACCESS_KEY`, not Supabase JWTs.
+Note: `--no-verify-jwt` is set on `ecb-mcp` and `brain-middleware`. Auth is handled by `MCP_ACCESS_KEY`, not Supabase JWTs.
 
 ---
 
-## ecos-mcp — ECOS Action Layer
+## ecb-mcp — Effortless Connection Brain (the consolidated MCP server)
 
-*Renamed from `ecos-crm-mcp` on 2026-05-04 to reflect expanded scope (CRM + IT billing + person intelligence + taste preferences + future life-engine/dispatcher tooling).*
+`ecb-mcp` is the single MCP server for ECOS::BRAIN. It hosts all 31 tools across BRAIN (semantic memory) and ECOS (action on memory) domains. Per OB1 canon, this is one logical Open Brain instance per user; the prior split into `open-brain-mcp` + `ecos-crm-mcp` (renamed `ecos-mcp`) was an unintentional drift consolidated back together on 2026-05-04. See `~/ecos/docs/architecture/mcp-boundary-decision.md` for the rationale.
 
-MCP endpoint for ECOS structured action on memory and real-world entities. Same auth pattern as open-brain-mcp.
+**Tools (31 total)**, organized into per-domain modules:
+- **BRAIN** (6): `search_thoughts`, `list_thoughts`, `thought_stats`, `capture_thought`, `update_thought`, `delete_thought`
+- **Contacts** (8): `add_contact`, `search_contacts`, `log_interaction`, `get_contact_history`, `get_follow_ups_due`, `update_contact`, `get_contacts_by_domain`, `set_administrative_status`
+- **Opportunities** (1): `create_opportunity`
+- **Billing** (5): `log_service_call`, `get_client_service_history`, `get_unbilled_work`, `create_billing_entry`, `update_billing_status`
+- **Observations** (4): `add_person_observation`, `get_person_observations`, `compile_person_snapshot`, `get_person_card`
+- **Brain-bridge** (3): `link_thought_to_contact`, `get_linked_thoughts`, `search_brain_for_contact`
+- **Briefing** (1): `get_briefing_context`
+- **Taste** (3): `capture_taste_preference`, `update_taste_preference`, `list_taste_preferences`
 
-**Tools include:** CRM (`add_contact`, `search_contacts`, `log_interaction`, `get_contact_history`, `create_opportunity`, `get_follow_ups_due`, `update_contact`, `get_contacts_by_domain`, `set_administrative_status`, `link_thought_to_contact`, `get_briefing_context`, `get_linked_thoughts`), IT billing, person intelligence (`add_person_observation`, `get_person_observations`, `compile_person_snapshot`, `get_person_card`, `search_brain_for_contact`), and taste (`capture_taste_preference`, `update_taste_preference`, `list_taste_preferences`).
+Tool prefix is `mcp__ecb__*`.
 
-**Connect from Claude Code:**
+### Connecting clients
+
+The auth layer accepts BOTH a `x-brain-key` header AND a `?key=...` query parameter. Different clients use different patterns:
+
+**Claude Code (terminal):**
 ```bash
-claude mcp add --transport http ecos-mcp \
-  [SUPABASE_URL]/functions/v1/ecos-mcp \
+claude mcp add --transport http ecb \
+  [SUPABASE_URL]/functions/v1/ecb-mcp \
   --header "x-brain-key: [ACCESS_KEY]"
 ```
 
-**Migrating from `ecos-crm-mcp`:**
+**Claude Desktop, ChatGPT, claude.ai (and any other client whose connector UI doesn't expose custom headers):**
+Use the URL with the access key as a query parameter:
+```
+[SUPABASE_URL]/functions/v1/ecb-mcp?key=[ACCESS_KEY]
+```
+
+**Migrating from older configs (`open-brain` + `ecos-mcp` / `ecos-crm`):**
 ```bash
-claude mcp remove ecos-crm
-# then add the new endpoint above, then restart Claude Code
+claude mcp remove open-brain
+claude mcp remove ecos-mcp   # or ecos-crm if that's what's registered
+# then add ecb (above), then restart Claude Code
 ```
