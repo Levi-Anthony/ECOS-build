@@ -1,14 +1,14 @@
 // ecb-mcp — Effortless Connection Brain (the consolidated MCP server for ECOS::BRAIN).
 //
 // One MCP server, one URL (/functions/v1/ecb-mcp), one tool prefix (mcp__ecb__*),
-// 31 tools across 8 per-domain modules. Per OB1 canon: one logical Open Brain
+// 41 tools across 10 per-domain modules. Per OB1 canon: one logical Open Brain
 // instance per user. See ~/ecos/docs/architecture/mcp-boundary-decision.md for
 // rationale and migration history.
 //
 // Module structure: each tool module exports `register(registrar, supabase, helpers)`
 // and registers its tools via the tracked registrar (which throws synchronously
 // on duplicate name). After all modules register, the count assertion below
-// verifies exactly 31 tools live.
+// verifies exactly 41 tools live.
 //
 // Middleware order is load-bearing: CORS first (so OPTIONS preflight succeeds
 // without auth), then auth (x-brain-key header OR ?key= query param), then the
@@ -37,8 +37,10 @@ import { register as registerObservations } from "./tools/observations.ts";
 import { register as registerBrainBridge } from "./tools/brain-bridge.ts";
 import { register as registerBriefing } from "./tools/briefing.ts";
 import { register as registerTaste } from "./tools/taste.ts";
+import { register as registerArtifacts } from "./tools/artifacts.ts";
+import { register as registerEntities } from "./tools/entities.ts";
 
-const EXPECTED_TOOL_COUNT = 31;
+const EXPECTED_TOOL_COUNT = 41;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -57,6 +59,8 @@ registerObservations(registrar, supabase, helpers);
 registerBrainBridge(registrar, supabase, helpers);
 registerBriefing(registrar, supabase, helpers);
 registerTaste(registrar, supabase, helpers);
+registerArtifacts(registrar, supabase, helpers);
+registerEntities(registrar, supabase, helpers);
 
 // G-Startup-1: enforce expected tool count. Duplicates would have already
 // thrown synchronously during a registrar.registerTool call; this catches
