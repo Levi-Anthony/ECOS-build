@@ -112,6 +112,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         type_label: z.string().optional(),
         status: z.enum(["active", "archived", "superseded"]).optional(),
         invocation_count: z.number().int().nonnegative().optional(),
+        evidence: z.string().nullable().optional().describe("Human-readable provenance of why this preference exists"),
+        confidence: z.enum(["low", "medium", "high"]).nullable().optional().describe("Durability assessment: low/medium/high or null"),
       }),
       change_type: z.enum(["upgraded", "downgraded", "refined", "archived"]),
       reason: z.string().describe("Why this change is being made"),
@@ -173,7 +175,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     try {
       let q = supabase
         .from("taste_preferences")
-        .select("id, preference_name, domain, reject, want, type_label, status, invocation_count, last_invoked_at, created_at, thought_id")
+        .select("id, preference_name, domain, reject, want, type_label, status, invocation_count, last_invoked_at, created_at, thought_id, evidence, confidence, source")
         .order("status", { ascending: true })
         .order("invocation_count", { ascending: false })
         .order("created_at", { ascending: false })
@@ -186,11 +188,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       if (!data?.length) return { content: [{ type: "text" as const, text: "No taste preferences found." }] };
 
       const lines: string[] = [`${data.length} taste preference(s):\n`];
-      for (const row of data as Array<{ id: string; preference_name: string | null; domain: string | null; type_label: string | null; status: string; invocation_count: number; reject: string | null; want: string | null }>) {
+      for (const row of data as Array<{ id: string; preference_name: string | null; domain: string | null; type_label: string | null; status: string; invocation_count: number; reject: string | null; want: string | null; evidence: string | null; confidence: string | null; source: string | null }>) {
         lines.push(`• [${row.status}] ${row.preference_name ?? "(unnamed)"} — ${row.type_label ?? ""}${row.domain ? " · " + row.domain : ""}`);
         if (row.reject) lines.push(`  Reject: ${row.reject.slice(0, 120)}${row.reject.length > 120 ? "…" : ""}`);
         if (row.want) lines.push(`  Want: ${row.want.slice(0, 120)}${row.want.length > 120 ? "…" : ""}`);
-        lines.push(`  ID: ${row.id} · invocations: ${row.invocation_count}`);
+        lines.push(`  ID: ${row.id} · invocations: ${row.invocation_count}${row.confidence ? " · confidence: " + row.confidence : ""}${row.source ? " · source: " + row.source : ""}`);
+        if (row.evidence) lines.push(`  Evidence: ${row.evidence.slice(0, 160)}${row.evidence.length > 160 ? "…" : ""}`);
       }
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     } catch (err: unknown) {
