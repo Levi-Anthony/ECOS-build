@@ -44,7 +44,7 @@ import { register as registerTaste } from "./tools/taste.ts";
 import { register as registerArtifacts } from "./tools/artifacts.ts";
 import { register as registerEntities } from "./tools/entities.ts";
 
-const EXPECTED_TOOL_COUNT = 48; // Phase 4.1: +2 write tools (log_pulse, append_handoff_event) on top of Phase 4.0's 46
+const EXPECTED_TOOL_COUNT = 50; // Phase 4.2: +2 read tools (get_thought, get_thoughts) — thoughts addressability fix
 
 const supabase = createServiceClient();
 
