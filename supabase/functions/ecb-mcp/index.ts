@@ -1,14 +1,17 @@
 // ecb-mcp — Effortless Connection Brain (the consolidated MCP server for ECOS::BRAIN).
 //
 // One MCP server, one URL (/functions/v1/ecb-mcp), one tool prefix (mcp__ecb__*),
-// 41 tools across 10 per-domain modules. Per OB1 canon: one logical Open Brain
-// instance per user. See ~/ecos/docs/architecture/mcp-boundary-decision.md for
-// rationale and migration history.
+// 41 tools across 10 per-domain modules + 3 ECBRAIN stub modules (Phase 2 refactor).
+// Per OB1 canon: one logical Open Brain instance per user.
+// See ~/ecos/docs/architecture/mcp-boundary-decision.md for rationale and migration history.
 //
 // Module structure: each tool module exports `register(registrar, supabase, helpers)`
 // and registers its tools via the tracked registrar (which throws synchronously
 // on duplicate name). After all modules register, the count assertion below
 // verifies exactly 41 tools live.
+//
+// ECBRAIN stub modules (pulse, handoff, boot) register 0 tools in Phase 2.
+// They will grow in Phases 3–4. Count assertion remains 41 until then.
 //
 // Middleware order is load-bearing: CORS first (so OPTIONS preflight succeeds
 // without auth), then auth (x-brain-key header OR ?key= query param), then the
@@ -19,17 +22,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createClient } from "@supabase/supabase-js";
+import { createServiceClient } from "./lib/supabase.ts";
 
 import {
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
   MCP_ACCESS_KEY,
   createTrackedRegistrar,
   helpers,
 } from "./helpers.ts";
 
-import { register as registerBrain } from "./tools/brain.ts";
+import { register as registerThoughtTools } from "./tools/thoughts.ts";
+import { register as registerPulseTools }   from "./tools/pulse.ts";
+import { register as registerHandoffTools } from "./tools/handoff.ts";
+import { register as registerBootTools }    from "./tools/boot.ts";
 import { register as registerContacts } from "./tools/contacts.ts";
 import { register as registerOpportunities } from "./tools/opportunities.ts";
 import { register as registerBilling } from "./tools/billing.ts";
@@ -40,9 +44,9 @@ import { register as registerTaste } from "./tools/taste.ts";
 import { register as registerArtifacts } from "./tools/artifacts.ts";
 import { register as registerEntities } from "./tools/entities.ts";
 
-const EXPECTED_TOOL_COUNT = 41;
+const EXPECTED_TOOL_COUNT = 48; // Phase 4.1: +2 write tools (log_pulse, append_handoff_event) on top of Phase 4.0's 46
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createServiceClient();
 
 const server = new McpServer({
   name: "ecb",
@@ -51,7 +55,10 @@ const server = new McpServer({
 
 const registrar = createTrackedRegistrar(server);
 
-registerBrain(registrar, supabase, helpers);
+registerThoughtTools(registrar, supabase, helpers);
+registerPulseTools(registrar, supabase, helpers);
+registerHandoffTools(registrar, supabase, helpers);
+registerBootTools(registrar, supabase, helpers);
 registerContacts(registrar, supabase, helpers);
 registerOpportunities(registrar, supabase, helpers);
 registerBilling(registrar, supabase, helpers);
