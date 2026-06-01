@@ -111,6 +111,39 @@ Note: `--no-verify-jwt` is set on `ecb-mcp` and `brain-middleware`. Auth is hand
 
 ---
 
+## Deploy discipline — ecb-mcp (2026-06-01, ACTIVE until brain.ts reconciled)
+
+**Deploy `ecb-mcp` ONLY from branch `restore/deploy-canonical`, NEVER from `main`.**
+
+The deployed function descends from the modular `tools/thoughts.ts` lineage (commit `7500b1a`).
+`main` reached `tools/brain.ts` via a separate consolidation (`a0db8c6`) that dropped the 7
+boot/handoff/pulse tools — `get_boot_context`, `save_handoff_snapshot`, `append_handoff_event`,
+`get_latest_handoff_snapshot`, `list_handoff_events`, `log_pulse`, `list_recent_pulse` — and has
+**never been deployed**. Deploying `main` would remove those 7 tools from the live function and be a
+first-ever prod boot of an untested rewrite. Until `brain.ts` is reconciled (the 7 tools ported back
+in, first-boot-tested on `open-brain-staging`) and proven in prod, do **NOT** enable a
+deploy-from-main guard. The `brain.ts` work + 3 undeployed features (artifacts `6c4b089`, Zod-4
+`tools/list` fix `4ddd3d4`, taste evidence `008eeec`) are preserved on `backup/pre-reconcile`.
+
+**Correct deploy command (the `--project-ref` is load-bearing):**
+```bash
+git checkout restore/deploy-canonical
+supabase functions deploy ecb-mcp --no-verify-jwt --project-ref lqbrzoicorehwidkdhoi
+```
+> ⚠ FOOTGUN: the local `supabase` link points at **open-brain-staging**
+> (`gfqumzumfdeeojuwwvbu`, INACTIVE). Without the explicit `--project-ref lqbrzoicorehwidkdhoi`
+> you deploy to the wrong project.
+
+As of 2026-06-01 the live function is **v14, 50 tools** (`EXPECTED_TOOL_COUNT=50`), including Atom
+Addressability (`get_thought`, `get_thoughts`). The "31 tools" / "41 tools" figures elsewhere in this
+file and in `index.ts` headers are stale relative to the deployed line.
+
+**TODO — drift check:** a read-only check comparing the deployed tool count + file manifest against
+`restore/deploy-canonical` (report-only, no mutation). Tracked in BRAIN handoff event
+`ecb-reconcile-2026-06-01-deployrule`.
+
+---
+
 ## ecb-mcp — Effortless Connection Brain (the consolidated MCP server)
 
 `ecb-mcp` is the single MCP server for ECOS::BRAIN. It hosts all 31 tools across BRAIN (semantic memory) and ECOS (action on memory) domains. Per OB1 canon, this is one logical Open Brain instance per user; the prior split into `open-brain-mcp` + `ecos-crm-mcp` (renamed `ecos-mcp`) was an unintentional drift consolidated back together on 2026-05-04. See `~/ecos/docs/architecture/mcp-boundary-decision.md` for the rationale.
