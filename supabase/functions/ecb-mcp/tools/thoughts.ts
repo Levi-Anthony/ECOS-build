@@ -111,15 +111,26 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         horizon: z.string().optional().describe("Filter by horizon: immediate, project, evergreen"),
         signal_type: z.string().optional().describe("Filter by signal_type: taste, voice, struct, decision, framework, content"),
         collection_id: z.string().optional().describe("Filter by collection slug — returns all members of a named collection regardless of similarity"),
+        needs_split: z.boolean().optional().describe("Only thoughts flagged as needing a split (metadata.needs_split=true)"),
+        status: z.string().optional().describe("Lifecycle filter. Defaults to current rows only (status='current' or null). Pass 'all' to include superseded/archived/split."),
       },
     },
-    async ({ limit, type, topic, person, days, domain, horizon, signal_type, collection_id }) => {
+    async ({ limit, type, topic, person, days, domain, horizon, signal_type, collection_id, needs_split, status }) => {
       try {
         let q = supabase
           .from("thoughts")
-          .select("id, content, metadata, created_at")
+          .select("id, content, metadata, status, created_at, updated_at")
           .order("created_at", { ascending: false })
           .limit(limit);
+        // Lifecycle default: hide non-current rows unless caller opts in.
+        // Live data is all status='current'; null-tolerant so a future
+        // null-defaulted insert is not silently hidden from browse.
+        if (status && status !== "all") {
+          q = q.eq("status", status);
+        } else if (!status) {
+          q = q.or("status.eq.current,status.is.null");
+        }
+        if (needs_split) q = q.contains("metadata", { needs_split: true });
         if (type) q = q.contains("metadata", { type });
         if (topic) q = q.contains("metadata", { topics: [topic] });
         if (person) q = q.contains("metadata", { people: [person] });
@@ -144,13 +155,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
         const results = data.map(
           (
-            t: { id: string; content: string; metadata: Record<string, unknown>; created_at: string },
+            t: { id: string; content: string; metadata: Record<string, unknown>; status: string | null; created_at: string; updated_at: string | null },
             i: number
           ) => {
             const m = t.metadata || {};
             const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
             const meta = [m.type || "??", m.domain, m.horizon, m.signal_type].filter(Boolean).join(" | ");
-            return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}] (${meta}${tags ? " — " + tags : ""})\n   ID: ${t.id}\n   ${t.content}`;
+            const stale = t.status && t.status !== "current" ? ` | status: ${t.status}` : "";
+            const updated =
+              t.updated_at && t.updated_at !== t.created_at
+                ? ` | updated: ${new Date(t.updated_at).toLocaleDateString()}`
+                : "";
+            return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}${updated}]${stale} (${meta}${tags ? " — " + tags : ""})\n   ID: ${t.id}\n   ${t.content}`;
           }
         );
         return {
@@ -259,7 +275,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (!needsSplit) delete meta.needs_split; // omit false flag from metadata
 
         const embedding = await getEmbedding(storedContent);
-        const { error } = await supabase.from("thoughts").insert({
+        const { data: inserted, error } = await supabase.from("thoughts").insert({
           content: storedContent,
           original_content: content,
           embedding,
@@ -268,14 +284,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             source: "mcp",
             ...(isFallback ? { metadata_fallback: true } : {}),
           },
-        });
-        if (error) {
+        }).select("id").single();
+        if (error || !inserted?.id) {
           return {
-            content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }],
+            content: [{ type: "text" as const, text: `Failed to capture: ${error?.message ?? "insert returned no id"}` }],
             isError: true,
           };
         }
-        let confirmation = `Captured as ${meta.type || "thought"}`;
+        let confirmation = `Captured thought ${inserted.id} as ${meta.type || "thought"}`;
         if (Array.isArray(meta.topics) && meta.topics.length)
           confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
         if (Array.isArray(meta.people) && meta.people.length)
@@ -462,6 +478,103 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         return {
           content: [{ type: "text" as const, text: `Deleted thought ${id}\nArchived to thought_history\nContent: ${preview}` }],
         };
+      } catch (err: unknown) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Tool 7: Get Thought (exact-ID read — provenance addressability)
+  registrar.registerTool(
+    "get_thought",
+    {
+      title: "Get Thought by ID",
+      description:
+        "Fetch a single thought atom by its exact UUID. Resolves regardless of lifecycle status (current, superseded, archived, split) — exact-handle lookup is the provenance guarantee that citations to old atoms stay verifiable. Returns the atom plus its status; does NOT return the embedding vector.",
+      inputSchema: {
+        thought_id: z.string().uuid().describe("Exact UUID of the thought atom"),
+      },
+    },
+    async ({ thought_id }) => {
+      try {
+        const { data: t, error } = await supabase
+          .from("thoughts")
+          .select("id, content, original_content, metadata, status, created_at, updated_at")
+          .eq("id", thought_id)
+          .single();
+        // retrieval_count intentionally NOT selected — telemetry is deferred this
+        // sprint and the column is unwired; selecting it would imply a feature that
+        // does not exist. Re-add here if/when a record_retrieval path lands.
+        if (error || !t) {
+          return {
+            content: [{ type: "text" as const, text: `Thought not found: ${thought_id}${error ? ` (${error.message})` : ""}` }],
+            isError: true,
+          };
+        }
+        const m = (t.metadata || {}) as Record<string, unknown>;
+        const lines = [
+          `ID: ${t.id}`,
+          t.status && t.status !== "current"
+            ? `Status: ${t.status}  ⚠ not current — may have been superseded; verify before relying on it.`
+            : `Status: ${t.status ?? "current"}`,
+          `Captured: ${new Date(t.created_at).toLocaleDateString()}${t.updated_at && t.updated_at !== t.created_at ? ` | Updated: ${new Date(t.updated_at).toLocaleDateString()}` : ""}`,
+          `Type: ${m.type || "unknown"}${m.domain ? ` | Domain: ${m.domain}` : ""}${m.horizon ? ` | Horizon: ${m.horizon}` : ""}${m.signal_type ? ` | Signal: ${m.signal_type}` : ""}`,
+        ];
+        if (Array.isArray(m.topics) && m.topics.length) lines.push(`Topics: ${(m.topics as string[]).join(", ")}`);
+        if (Array.isArray(m.people) && m.people.length) lines.push(`People: ${(m.people as string[]).join(", ")}`);
+        if (Array.isArray(m.action_items) && m.action_items.length) lines.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
+        lines.push(`\n${t.content}`);
+        // Provenance: surface the raw user input when capture rewrote it for self-containment.
+        if (t.original_content && t.original_content !== t.content)
+          lines.push(`\n--- original_content (raw input, pre-rewrite) ---\n${t.original_content}`);
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      } catch (err: unknown) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Tool 8: Get Thoughts (batch exact-ID read — resolve a whole FIBERR's cited atoms at once)
+  registrar.registerTool(
+    "get_thoughts",
+    {
+      title: "Get Thoughts by ID (batch)",
+      description:
+        "Fetch multiple thought atoms by exact UUID in one call. Preserves input order, reports any IDs that were not found, and includes each atom's lifecycle status. Resolves regardless of status (no lifecycle filter) — same provenance guarantee as get_thought. Use this to resolve all atoms a FIBERR/Filament cites in a single round-trip instead of N searches.",
+      inputSchema: {
+        thought_ids: z.array(z.string().uuid()).min(1).max(100).describe("Exact UUIDs to fetch (1–100)"),
+      },
+    },
+    async ({ thought_ids }) => {
+      try {
+        const { data, error } = await supabase
+          .from("thoughts")
+          .select("id, content, metadata, status, created_at, updated_at")
+          .in("id", thought_ids);
+        if (error) {
+          return { content: [{ type: "text" as const, text: `Batch fetch error: ${error.message}` }], isError: true };
+        }
+        const byId = new Map((data ?? []).map((r) => [r.id as string, r]));
+        const found: string[] = [];
+        const missing: string[] = [];
+        const blocks = thought_ids.map((id, i) => {
+          const t = byId.get(id);
+          if (!t) { missing.push(id); return `--- ${i + 1}. ${id} — NOT FOUND ---`; }
+          found.push(id);
+          const m = (t.metadata || {}) as Record<string, unknown>;
+          const stale = t.status && t.status !== "current" ? `  ⚠ ${t.status}` : "";
+          const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
+          return `--- ${i + 1}. ${id}${stale} ---\n[${new Date(t.created_at).toLocaleDateString()}] ${m.type || "?"}${m.domain ? ` | ${m.domain}` : ""}${tags ? ` — ${tags}` : ""}\n${t.content}`;
+        });
+        const header = `Resolved ${found.length}/${thought_ids.length} atom(s)` +
+          (missing.length ? ` | ${missing.length} not found: ${missing.join(", ")}` : "");
+        return { content: [{ type: "text" as const, text: `${header}\n\n${blocks.join("\n\n")}` }] };
       } catch (err: unknown) {
         return {
           content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
