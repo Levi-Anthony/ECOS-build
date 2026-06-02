@@ -1,0 +1,9 @@
+{
+  "name": "run-crm-dashboard-driver",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained Playwright harness for driving the crm-dashboard Next.js app (screenshots + DOM assertions). Not part of the app's build.",
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}
