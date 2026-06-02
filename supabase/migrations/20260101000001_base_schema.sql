@@ -1,3 +1,8 @@
+-- search_path fix (backfilled): pgvector lives in `extensions`; this migration
+-- references vector(1536) unqualified, which a clean `supabase db reset` runs
+-- public-only. Matches the convention in fix_thought_history / canonical_artifacts.
+SET search_path = public, extensions;
+
 -- Base schema — must run before all other migrations.
 -- Creates the thoughts and thought_history tables from scratch.
 -- Subsequent migrations ALTER these tables; this is the cold-start foundation.

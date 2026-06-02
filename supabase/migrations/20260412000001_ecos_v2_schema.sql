@@ -1,3 +1,8 @@
+-- search_path fix (backfilled): pgvector lives in `extensions`; this migration
+-- references vector(1536) unqualified, which a clean `supabase db reset` runs
+-- public-only. Matches the convention in fix_thought_history / canonical_artifacts.
+SET search_path = public, extensions;
+
 -- ECOS v2.0 Schema Migration
 -- Additive only — no existing data affected
 -- Applies to: thoughts table (already exists with content, embedding, metadata, created_at)
