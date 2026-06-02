@@ -165,8 +165,11 @@ and requires an explicit `mode`.
 - **Prod** (`lqbrzoicorehwidkdhoi`): **LIVE on Artifact v2 (2026-06-02).** Migration `20260602100000`
   applied (126 legacy artifacts backfilled 1:1 — gate green: missing-`/body`=0, orphan-links=0,
   126 snapshots, 126 migration revisions); function deployed from `main`, boots at 55 tools.
-  **Remaining:** run the embedding sweep (`reindex_artifact_embeddings`, needs the prod MCP key) so
-  migrated `/body` blocks become searchable. Original sequence (for reproducibility / rollback ref):
+  Embedding sweep **complete** (2026-06-02): 142/142 active blocks embedded, 0 missing, all 126
+  artifacts covered (verified by read-only SQL). NOTE: a full unscoped sweep exceeds the edge
+  wall-clock at this corpus size — use `reindex_artifact_embeddings` in converging batches
+  (`only_missing=true`, default `limit` 25) or `scripts/ecb-reindex-embeddings.py --limit 10`, which
+  loops until 0 remain. Original sequence (for reproducibility / rollback ref):
   ```bash
   # 1. apply migration to prod (committed file). NOTE: `db push` has NO --project-ref.
   #    Use --db-url so the staging link stays intact AND the version is recorded as the
