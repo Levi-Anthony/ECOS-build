@@ -164,8 +164,12 @@ and requires an explicit `mode`.
   check below, not on staging.
 - **Prod** (`lqbrzoicorehwidkdhoi`): NOT yet applied/deployed — gated on explicit approval. Sequence:
   ```bash
-  # 1. apply migration to prod (committed file)
-  supabase db push --project-ref lqbrzoicorehwidkdhoi
+  # 1. apply migration to prod (committed file). NOTE: `db push` has NO --project-ref.
+  #    Use --db-url so the staging link stays intact AND the version is recorded as the
+  #    filename prefix (keeps ecb-migration-drift.py green). Needs the prod DB password.
+  supabase db push --db-url "postgresql://postgres.lqbrzoicorehwidkdhoi:<PROD_DB_PASSWORD>@<prod-pooler-host>:5432/postgres"
+  #    (Do NOT use the Supabase MCP apply_migration here: it records its own timestamp
+  #     version, not 20260602100000, which manufactures false migration drift.)
   ```
   **1b. BACKFILL VERIFICATION GATE — run in the prod SQL editor BEFORE deploying the function.**
   The old v14 function is still serving prod and the v1 tables are intact, so a bad backfill here is
