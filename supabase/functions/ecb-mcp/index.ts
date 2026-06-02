@@ -44,7 +44,7 @@ import { register as registerTaste } from "./tools/taste.ts";
 import { register as registerArtifacts } from "./tools/artifacts.ts";
 import { register as registerEntities } from "./tools/entities.ts";
 
-const EXPECTED_TOOL_COUNT = 50; // Phase 4.2: +2 read tools (get_thought, get_thoughts) — thoughts addressability fix
+const EXPECTED_TOOL_COUNT = 55; // Artifact v2: artifacts module 7 → 12 tools (patch-based engine; retired approve_artifact + update_artifact, added manifest/block/patch/checkpoint/snapshot/replace_body/reindex)
 
 const supabase = createServiceClient();
 

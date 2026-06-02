@@ -4,7 +4,7 @@
 // Tools registered here:
 //   get_boot_context  (read, READ_ONLY)
 //
-// boot_artifacts filter: canonical_artifacts WHERE tags && ARRAY['boot']
+// boot_artifacts filter: artifacts WHERE metadata->'tags' @> '["boot"]' (Artifact v2)
 //   — v3.2 correction: no metadata column; tags array is the mechanism.
 //   Add the 'boot' tag to any artifact that should appear at boot.
 //
@@ -42,15 +42,16 @@ interface PulseRow {
   occurred_at: string;
 }
 
+// Raw v2 artifacts row (boot-tagged via metadata.tags). Legacy fields
+// (authority_level/scope/target_runtime/summary/tags) live in metadata after
+// the artifacts-v2 migration and are flattened into the boot payload below.
 interface ArtifactRow {
   id: string;
+  key: string;
   title: string;
-  doc_type: string;
-  authority_level: string;
-  scope: string;
-  target_runtime: string;
-  tags: string[];
-  summary: string | null;
+  kind: string;
+  current_version: number;
+  metadata: Record<string, unknown>;
   updated_at: string;
 }
 
@@ -125,7 +126,7 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       description:
         "Bundled read returning everything needed to boot a desktop or mobile session: " +
         "latest handoff snapshot, recent pulse entries (last 20), derived orientation, " +
-        "boot artifacts (canonical_artifacts tagged 'boot'), and server time. " +
+        "boot artifacts (v2 artifacts tagged 'boot'), and server time. " +
         "Any sub-fetch failure degrades that field to null/[] but the call still succeeds. " +
         "Client decides what is enough to boot.",
       inputSchema: {
@@ -185,20 +186,32 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       }
 
       // ── 3. Boot artifacts ──────────────────────────────────────────────────
-      // Correction v3.2: filter = tags && ARRAY['boot'] (no metadata column).
-      // Add the 'boot' tag to any canonical_artifact that should appear at boot.
-      let bootArtifacts: ArtifactRow[] = [];
+      // Artifact v2: boot docs live in `artifacts` with metadata.tags including
+      // 'boot'. Add the 'boot' tag (in metadata) to any artifact that should
+      // appear at boot. Legacy fields are flattened from metadata for the payload.
+      let bootArtifacts: Record<string, unknown>[] = [];
       try {
         const { data, error } = await supabase
-          .from("canonical_artifacts")
-          .select("id, title, doc_type, authority_level, scope, target_runtime, tags, summary, updated_at")
-          .contains("tags", ["boot"])
+          .from("artifacts")
+          .select("id, key, title, kind, current_version, metadata, updated_at")
+          .contains("metadata", { tags: ["boot"] }) // metadata @> '{"tags":["boot"]}'
           .order("updated_at", { ascending: false });
 
         if (error) {
           degraded.boot_artifacts_error = error.message;
         } else {
-          bootArtifacts = (data ?? []) as ArtifactRow[];
+          bootArtifacts = ((data ?? []) as ArtifactRow[]).map((a) => {
+            const m = (a.metadata ?? {}) as Record<string, unknown>;
+            return {
+              id: a.id, key: a.key, title: a.title, kind: a.kind, version: a.current_version,
+              authority_level: m.authority_level ?? null,
+              scope: m.scope ?? null,
+              target_runtime: m.target_runtime ?? null,
+              summary: m.summary ?? null,
+              tags: m.tags ?? [],
+              updated_at: a.updated_at,
+            };
+          });
         }
       } catch (err: unknown) {
         degraded.boot_artifacts_error = (err as Error).message;

@@ -141,6 +141,65 @@ Live as of 2026-06-02: **v14, 50 tools**. The "31 tools" figures lower in this f
 
 ---
 
+## Artifact v2 — patch-based canonical artifacts (migration 20260602100000)
+
+Storage-engine refactor of the artifact lane: artifacts are now edited by block-level **patches**
+(optimistic concurrency + immutable revision ledger + compiled snapshots + block-level search), not
+whole-body replacement. Full architecture + agent workflow: `docs/architecture/artifacts-v2.md`.
+
+This raises the artifacts module from 7 → 12 tools, so **`EXPECTED_TOOL_COUNT = 55`** (was 50).
+Retired: `approve_artifact`, `update_artifact`. Added: `get_artifact_manifest`, `get_artifact_block`,
+`patch_artifact`, `checkpoint_artifact`, `get_artifact_snapshot`, `replace_artifact_body` (admin),
+`reindex_artifact_embeddings`.
+
+**Agent behavior rule:** do NOT rewrite a whole artifact body for normal updates. Use
+**manifest → block read → patch** (`get_artifact_manifest` → `get_artifact_block` → `patch_artifact`
+with `base_version` + per-block `expected_hash`). `replace_artifact_body` is admin/import/repair only
+and requires an explicit `mode`.
+
+**Rollout state:**
+- **Staging** (`gfqumzumfdeeojuwwvbu`): migration applied + function deployed + boot assertion passes;
+  **acceptance harness 11/11 PASS** (2026-06-02). The backfill test SKIPPED — staging has no
+  `canonical_artifacts` rows — so the *row-present* backfill path is verified on prod via the gated
+  check below, not on staging.
+- **Prod** (`lqbrzoicorehwidkdhoi`): NOT yet applied/deployed — gated on explicit approval. Sequence:
+  ```bash
+  # 1. apply migration to prod (committed file)
+  supabase db push --project-ref lqbrzoicorehwidkdhoi
+  ```
+  **1b. BACKFILL VERIFICATION GATE — run in the prod SQL editor BEFORE deploying the function.**
+  The old v14 function is still serving prod and the v1 tables are intact, so a bad backfill here is
+  a clean rollback (don't deploy; investigate). All three must hold:
+  ```sql
+  -- (a) every legacy artifact migrated 1:1
+  select (select count(*) from canonical_artifacts) as legacy,
+         (select count(*) from artifacts where metadata->>'migrated_from'='canonical_artifacts') as migrated;
+  -- (b) every legacy artifact has a /body block (lossless import)
+  select count(*) as legacy_missing_body from canonical_artifacts c
+    where not exists (select 1 from artifact_blocks b where b.artifact_id=c.id and b.path='/body');
+  -- (c) every artifact_link still resolves (provenance preserved)
+  select count(*) as orphan_links from artifact_links l
+    where not exists (select 1 from artifacts a where a.id=l.artifact_id);
+  -- expect: legacy == migrated, legacy_missing_body == 0, orphan_links == 0
+  ```
+  ```bash
+  # 2. deploy from main with the load-bearing explicit ref (only after 1b passes)
+  git checkout main   # after merge
+  supabase functions deploy ecb-mcp --no-verify-jwt --project-ref lqbrzoicorehwidkdhoi
+  # 3. read-only drift checks
+  ECB_KEY=… python3 scripts/ecb-drift-check.py --branch main
+  SUPABASE_ACCESS_TOKEN=… python3 scripts/ecb-migration-drift.py
+  # 4. post-deploy acceptance (prod): test 10 now exercises real migrated rows
+  ECB_URL=…prod… ECB_KEY=… python3 scripts/ecb-artifacts-v2-verify.py
+  # 5. eager-embed migrated /body blocks (touches prod data)
+  #    call mcp__ecb__reindex_artifact_embeddings  (no args)
+  ```
+- The v1 tables (`canonical_artifacts`/`artifact_versions`/`artifact_chunks`/`artifact_links`/
+  `match_artifact_chunks`) are retained read-only for rollback; a later cleanup migration removes them
+  once v2 is proven.
+
+---
+
 ## ecb-mcp — Effortless Connection Brain (the consolidated MCP server)
 
 `ecb-mcp` is the single MCP server for ECOS::BRAIN. It hosts all 31 tools across BRAIN (semantic memory) and ECOS (action on memory) domains. Per OB1 canon, this is one logical Open Brain instance per user; the prior split into `open-brain-mcp` + `ecos-crm-mcp` (renamed `ecos-mcp`) was an unintentional drift consolidated back together on 2026-05-04. See `~/ecos/docs/architecture/mcp-boundary-decision.md` for the rationale.
