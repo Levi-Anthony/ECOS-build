@@ -62,10 +62,22 @@ def main():
         if args.key:   a["key"] = args.key
         if args.path:  a["path"] = args.path
         if args.limit: a["limit"] = args.limit
-        res = rpc("tools/call", {"name": "reindex_artifact_embeddings", "arguments": a})
-        text = "".join(c.get("text", "") for c in res.get("result", {}).get("content", []))
-        print(text or json.dumps(res, indent=2))
-        sys.exit(1 if res.get("result", {}).get("isError") else 0)
+        # Loop converging batches until the tool reports nothing remaining (or no key/path scope).
+        for _ in range(200):
+            res = rpc("tools/call", {"name": "reindex_artifact_embeddings", "arguments": a})
+            if not res or "result" not in res:
+                # Empty SSE body almost always means a server-side timeout — shrink the batch.
+                print("ERROR: empty/no response from server (likely a server-side timeout — "
+                      "re-run with a smaller --limit, e.g. --limit 10).", file=sys.stderr)
+                sys.exit(1)
+            result = res["result"]
+            text = "".join(c.get("text", "") for c in result.get("content", []))
+            print(text or json.dumps(res, indent=2))
+            if result.get("isError"):
+                sys.exit(1)
+            if args.key or args.path or "still missing" not in text:
+                break  # scoped call, or sweep is complete
+        sys.exit(0)
     except urllib.error.HTTPError as e:
         print(f"ERROR: HTTP {e.code}: {e.read().decode()[:200]}", file=sys.stderr); sys.exit(1)
 

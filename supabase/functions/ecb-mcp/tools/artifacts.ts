@@ -657,37 +657,53 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "reindex_artifact_embeddings",
     {
       title: "Reindex Artifact Embeddings",
-      description: "Regenerate block embeddings. With no args, sweeps all non-archived blocks (used for the post-migration eager backfill). Scope to one artifact (key) or one block (key+path).",
+      description: "Regenerate block embeddings in CONVERGING BATCHES. By default (only_missing=true) it skips blocks that already have embeddings and embeds up to `limit` of the rest, reporting how many remain — re-run until it reports 0. Large corpora MUST be swept this way because each call embeds synchronously within one request and a full sweep exceeds the edge wall-clock. Scope to one artifact (key) or one block (key+path); only_missing=false forces re-embedding.",
       inputSchema: {
-        key:   z.string().optional(),
-        path:  z.string().optional(),
-        limit: z.number().int().min(1).max(2000).optional().default(500),
+        key:          z.string().optional(),
+        path:         z.string().optional(),
+        limit:        z.number().int().min(1).max(2000).optional().default(25),
+        only_missing: z.boolean().optional().default(true),
       },
     },
-    async ({ key, path, limit }) => {
+    async ({ key, path, limit, only_missing }) => {
       try {
+        const onlyMissing = only_missing ?? true;
+        const cap = limit ?? 25;
         const titles = new Map<string, string>(); // artifact_id → title
-        let blocksQ = supabase.from("artifact_blocks").select("id, artifact_id, path, title, content, metadata").limit(limit ?? 500);
+        let blocksQ = supabase.from("artifact_blocks").select("id, artifact_id, path, title, content, metadata");
         if (key) {
           const a = await getArtifactByKey(supabase, key);
           if (!a) return errorResult(`Artifact not found: ${key}`);
           titles.set(a.id, a.title);
           blocksQ = blocksQ.eq("artifact_id", a.id);
           if (path) blocksQ = blocksQ.eq("path", path);
+        } else {
+          blocksQ = blocksQ.limit(2000); // candidate ceiling for a sweep
         }
         const { data, error } = await blocksQ;
         if (error) return errorResult(`Error: ${error.message}`);
-        const blocks = (data ?? []) as BlockRow[];
+        let candidates = ((data ?? []) as BlockRow[]).filter(b => !isArchived(b));
+
+        // Skip blocks that already have embeddings so repeated capped calls converge.
+        if (onlyMissing) {
+          const { data: emb } = await supabase.from("artifact_block_embeddings").select("artifact_id, block_path");
+          const have = new Set(((emb ?? []) as { artifact_id: string; block_path: string }[]).map(e => `${e.artifact_id}:${e.block_path}`));
+          candidates = candidates.filter(b => !have.has(`${b.artifact_id}:${b.path}`));
+        }
+
+        const missingTotal = candidates.length;
+        const batch = candidates.slice(0, cap);
         let embedded = 0; const warnings: string[] = [];
-        for (const b of blocks) {
-          if (isArchived(b)) continue;
+        for (const b of batch) {
           let title = titles.get(b.artifact_id);
           if (!title) { const a = await getArtifactById(supabase, b.artifact_id); title = a?.title ?? ""; titles.set(b.artifact_id, title); }
           const r = await embedBlock(supabase, getEmbedding, { id: b.artifact_id, title }, { id: b.id, path: b.path, title: b.title, content: b.content });
           if (r.ok) embedded += 1; else if (r.error) warnings.push(r.error);
         }
+        const remaining = onlyMissing ? Math.max(0, missingTotal - embedded) : 0;
         return textResult([
           `Reindexed ${embedded} block(s)${key ? ` for "${key}"` : " (sweep)"}.`,
+          onlyMissing ? (remaining > 0 ? `${remaining} block(s) still missing embeddings — re-run to continue.` : "All targeted blocks now embedded.") : "",
           warnings.length ? `⚠ warnings:\n - ${warnings.join("\n - ")}` : "",
         ].filter(Boolean).join("\n"));
       } catch (err: unknown) {
