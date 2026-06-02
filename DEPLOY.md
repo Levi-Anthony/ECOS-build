@@ -162,7 +162,11 @@ and requires an explicit `mode`.
   **acceptance harness 11/11 PASS** (2026-06-02). The backfill test SKIPPED — staging has no
   `canonical_artifacts` rows — so the *row-present* backfill path is verified on prod via the gated
   check below, not on staging.
-- **Prod** (`lqbrzoicorehwidkdhoi`): NOT yet applied/deployed — gated on explicit approval. Sequence:
+- **Prod** (`lqbrzoicorehwidkdhoi`): **LIVE on Artifact v2 (2026-06-02).** Migration `20260602100000`
+  applied (126 legacy artifacts backfilled 1:1 — gate green: missing-`/body`=0, orphan-links=0,
+  126 snapshots, 126 migration revisions); function deployed from `main`, boots at 55 tools.
+  **Remaining:** run the embedding sweep (`reindex_artifact_embeddings`, needs the prod MCP key) so
+  migrated `/body` blocks become searchable. Original sequence (for reproducibility / rollback ref):
   ```bash
   # 1. apply migration to prod (committed file). NOTE: `db push` has NO --project-ref.
   #    Use --db-url so the staging link stays intact AND the version is recorded as the
