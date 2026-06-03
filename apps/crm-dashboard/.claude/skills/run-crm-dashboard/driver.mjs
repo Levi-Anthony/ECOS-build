@@ -18,8 +18,12 @@
 // state. row_like_elements before/after is your assertion handle.
 //
 // Env:
-//   BASE_URL   (default http://localhost:3000)
-//   HEADED=1   run headed (needs a display; default headless)
+//   BASE_URL       (default http://localhost:3000)
+//   SITE_PASSWORD  password for the Basic-Auth gate (also reads BASIC_AUTH_PASSWORD)
+//   HEADED=1       run headed (needs a display; default headless)
+//
+// Flags: --click <selector> (click then shoot) · --mobile (390x844 phone viewport;
+//        screenshots get a -mobile suffix)
 
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -70,19 +74,34 @@ async function drive(page, route, outfile, click) {
   return summary;
 }
 
-// arg parsing: [route] [outfile] [--click <selector>]
+// arg parsing: [route] [outfile] [--click <selector>] [--mobile]
 const args = process.argv.slice(2);
 const clickIdx = args.indexOf("--click");
 const click = clickIdx >= 0 ? args.splice(clickIdx, 2)[1] : undefined;
+const mobileIdx = args.indexOf("--mobile");
+const mobile = mobileIdx >= 0;
+if (mobile) args.splice(mobileIdx, 1);
 const arg = args[0] ?? "/";
 const out = args[1];
+
+// The dashboard sits behind a Basic-Auth gate — pass SITE_PASSWORD (or
+// BASIC_AUTH_PASSWORD) and the browser context authenticates automatically.
+const pw = process.env.SITE_PASSWORD ?? process.env.BASIC_AUTH_PASSWORD;
+const viewport = mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 };
+const suffix = mobile ? "-mobile" : "";
+
 const browser = await chromium.launch({ headless: !process.env.HEADED });
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const context = await browser.newContext({
+  viewport,
+  ...(mobile ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
+  ...(pw ? { httpCredentials: { username: "admin", password: pw } } : {}),
+});
+const page = await context.newPage();
 try {
   if (arg === "all") {
-    for (const r of ROUTES) await drive(page, r, `shots/${slug(r)}.png`);
+    for (const r of ROUTES) await drive(page, r, `shots/${slug(r)}${suffix}.png`);
   } else {
-    await drive(page, arg, out ?? `shots/${slug(arg)}.png`, click);
+    await drive(page, arg, out ?? `shots/${slug(arg)}${suffix}.png`, click);
   }
 } finally {
   await browser.close();

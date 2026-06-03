@@ -54,6 +54,15 @@ without eyeballing.
    The `--click` run reports `rows_before`/`rows_after` so you can assert the filter changed the
    table (e.g. All=3 → Tango=1). Screenshots land in `apps/crm-dashboard/shots/` (gitignored).
    `cd` into the skill dir first if you prefer shorter paths — `cd .claude/skills/run-crm-dashboard && node driver.mjs /`.
+
+   **The dashboard is password-gated (Basic Auth middleware).** Pass the gate password so the driver
+   authenticates (it sets Playwright `httpCredentials`); without it you'll just capture the 401 wall:
+   ```bash
+   SITE_PASSWORD='<site password>' node .claude/skills/run-crm-dashboard/driver.mjs /artifacts
+   SITE_PASSWORD='<site password>' node .claude/skills/run-crm-dashboard/driver.mjs /artifacts --mobile
+   ```
+   `--mobile` uses a 390×844 phone viewport and suffixes screenshots with `-mobile`. To verify the
+   live (already-gated) production site instead of local, also set `BASE_URL=https://<prod-host>`.
 4. **Stop the server** when done:
    ```bash
    lsof -ti tcp:3000 | xargs kill
