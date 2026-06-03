@@ -20,7 +20,7 @@ server-rendered (Next 14 App Router), Tailwind, no client components; data via t
 | 1 | Markdown rendering in artifact blocks | artifacts | DONE | Claude Code | 7318e5c |
 | 2 | Block sections + sticky TOC (artifact detail) | artifacts | DONE (Codex, b43edb0) | Codex | b43edb0 |
 | 3 | Artifacts responsive / mobile | artifacts+mobile | DONE (Codex, 97d288c) | Codex | 97d288c |
-| 4 | Artifacts list: search + summary header | artifacts | IN PROGRESS (Codex, 2026-06-03) | Codex | — |
+| 4 | Artifacts list: search + summary header | artifacts | DONE (Codex, 232260c) | Codex | 232260c |
 | 5 | App-wide mobile pass (table pages) | mobile | PENDING | — | — |
 | 6 | Cross-app visual consistency (optional) | polish | PENDING | — | — |
 
