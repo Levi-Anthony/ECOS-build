@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase-server";
 import type { Artifact, ArtifactBlock, ArtifactLink, ArtifactRevision } from "@/lib/supabase";
 import { relativeAge } from "@/lib/logic";
 import { ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
+import { Markdown } from "@/lib/markdown";
 import { notFound } from "next/navigation";
 
 // jsonb metadata is loosely typed — read fields with guards.
@@ -151,7 +152,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                   {b.content_hash && <span className="font-mono">{b.content_hash.slice(0, 8)}</span>}
                 </div>
               </div>
-              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{b.content}</p>
+              <Markdown>{b.content}</Markdown>
             </div>
           );
         })}
