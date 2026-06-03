@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Contact, ServiceLog } from "@/lib/supabase";
 import { aggregateLastService, aggregateUnbilled } from "@/lib/logic";
+import { PageHeader, StatGrid, StatCard } from "@/lib/page-ui";
 
 export default async function ITPage() {
   const [clientsRes, unbilledRes, lastServiceRes] = await Promise.all([
@@ -32,26 +33,19 @@ export default async function ITPage() {
 
   return (
     <div>
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-xl font-semibold">IT Clients</h1>
-        <span className="text-sm text-gray-500">{clients.length} active client{clients.length !== 1 ? "s" : ""}</span>
-      </div>
+      <PageHeader
+        glyph="◆"
+        glyphClass="text-sky-500"
+        title="IT Clients"
+        summary={`${clients.length} active client${clients.length !== 1 ? "s" : ""}`}
+      />
 
       {/* Stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Active clients</p>
-          <p className="text-2xl font-semibold mt-1">{clients.length}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Clients with unbilled work</p>
-          <p className="text-2xl font-semibold mt-1">{clientsWithUnbilled}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Total unbilled hours</p>
-          <p className="text-2xl font-semibold mt-1">{(totalUnbilledMin / 60).toFixed(1)}</p>
-        </div>
-      </div>
+      <StatGrid>
+        <StatCard label="Active clients" value={clients.length} />
+        <StatCard label="Clients with unbilled work" value={clientsWithUnbilled} highlight={clientsWithUnbilled > 0} />
+        <StatCard label="Total unbilled hours" value={(totalUnbilledMin / 60).toFixed(1)} />
+      </StatGrid>
 
       {/* Unbilled work summary */}
       {clientsWithUnbilled > 0 && (

@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase-server";
 import { DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
 import { relativeAge, computeIntelStatus, computeStaleness, type IntelStatus, type ObsAgg, type SnapInfo } from "@/lib/logic";
+import { PageHeader, StatGrid, StatCard } from "@/lib/page-ui";
 
 const STATUS_CHIP: Record<IntelStatus, string> = {
   unseeded: "bg-gray-100 text-gray-500",
@@ -103,28 +104,19 @@ export default async function PeoplePage({
 
   return (
     <div>
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-xl font-semibold">
-          <span className="text-emerald-500">◉</span> People Intel
-        </h1>
-        <span className="text-sm text-gray-500">{totalSeeded} seeded · {totalAttention} need attention</span>
-      </div>
+      <PageHeader
+        glyph="◉"
+        glyphClass="text-emerald-500"
+        title="People Intel"
+        summary={`${totalSeeded} seeded · ${totalAttention} need attention`}
+      />
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Contacts with intel</p>
-          <p className="text-2xl font-semibold mt-1">{totalSeeded}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Snapshots compiled</p>
-          <p className="text-2xl font-semibold mt-1">{totalSnapped}</p>
-        </div>
-        <div className={`rounded-lg border p-4 ${totalAttention > 0 ? "bg-amber-50 border-amber-200" : "bg-white border-gray-200"}`}>
-          <p className={`text-sm ${totalAttention > 0 ? "text-amber-700" : "text-gray-500"}`}>Need attention</p>
-          <p className={`text-2xl font-semibold mt-1 ${totalAttention > 0 ? "text-amber-800" : ""}`}>{totalAttention}</p>
-        </div>
-      </div>
+      <StatGrid>
+        <StatCard label="Contacts with intel" value={totalSeeded} />
+        <StatCard label="Snapshots compiled" value={totalSnapped} />
+        <StatCard label="Need attention" value={totalAttention} highlight={totalAttention > 0} />
+      </StatGrid>
 
       {/* Filter pills */}
       <div className="flex gap-2 flex-wrap mb-6">

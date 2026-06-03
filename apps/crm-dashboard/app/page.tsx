@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase-server";
 import { DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
 import type { Contact } from "@/lib/supabase";
 import { isFollowUpSoon, isOverdue, aggregateObsCounts } from "@/lib/logic";
+import { PageHeader, StatGrid, StatCard } from "@/lib/page-ui";
 
 export default async function ContactsPage({
   searchParams,
@@ -24,14 +25,28 @@ export default async function ContactsPage({
 
   const obsCountMap = aggregateObsCounts(obsRows ?? []);
 
+  const contactRows = (contacts as Contact[] | null) ?? [];
+  const totalContacts = contactRows.length;
+  const overdueCount = contactRows.filter((c) => isOverdue(c.follow_up_date)).length;
+  const dueSoonCount = contactRows.filter((c) => isFollowUpSoon(c.follow_up_date)).length;
+
   const domains = ["tango", "ttc", "outreach", "it", "music", "personal", "general"];
 
   return (
     <div>
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-xl font-semibold">Contacts</h1>
-        <span className="text-sm text-gray-500">{contacts?.length ?? 0} total</span>
-      </div>
+      <PageHeader
+        glyph="◍"
+        glyphClass="text-blue-500"
+        title="Contacts"
+        summary={`${totalContacts} total`}
+      />
+
+      {/* Stats */}
+      <StatGrid>
+        <StatCard label="Total contacts" value={totalContacts} />
+        <StatCard label="Follow-up due soon" value={dueSoonCount} />
+        <StatCard label="Overdue follow-ups" value={overdueCount} highlight={overdueCount > 0} />
+      </StatGrid>
 
       {/* Domain filter */}
       <div className="flex gap-2 flex-wrap mb-6">
