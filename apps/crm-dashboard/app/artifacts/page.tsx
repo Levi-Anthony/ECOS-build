@@ -77,7 +77,7 @@ export default async function ArtifactsPage({
   const FilterPill = ({ label, href, active }: { label: string; href: string; active: boolean }) => (
     <a
       href={href}
-      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+      className={`inline-flex min-h-10 items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${
         active
           ? "bg-gray-900 text-white"
           : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"
@@ -89,7 +89,7 @@ export default async function ArtifactsPage({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-xl font-semibold">
           <span className="text-violet-600">▤</span> Artifacts
         </h1>
@@ -102,7 +102,7 @@ export default async function ArtifactsPage({
         {kinds.map((k) => (
           <FilterPill key={k} label={k} href={buildUrl({ kind: k })} active={kind === k} />
         ))}
-        <span className="w-px bg-gray-200 mx-1" />
+        <span className="hidden sm:block w-px bg-gray-200 mx-1" />
         <FilterPill label="All statuses" href={buildUrl({ status: undefined })} active={!status} />
         {statuses.map((s) => (
           <FilterPill key={s} label={s} href={buildUrl({ status: s })} active={status === s} />
@@ -128,10 +128,10 @@ export default async function ArtifactsPage({
               href={`/artifacts/${encodeURIComponent(a.key)}`}
               className="block bg-white rounded-lg border border-gray-200 p-4 hover:border-violet-300 hover:shadow-sm transition-all"
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className="font-medium text-gray-900">{a.title}</span>
+                    <span className="font-medium text-gray-900 [overflow-wrap:anywhere]">{a.title}</span>
                     {a.kind && (
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${KIND_COLORS[a.kind] ?? "bg-gray-100 text-gray-700"}`}>
                         {a.kind}
@@ -161,14 +161,14 @@ export default async function ArtifactsPage({
                       </span>
                     )}
                   </div>
-                  <p className="font-mono text-xs text-gray-500 truncate">{a.key}</p>
+                  <p className="font-mono text-xs text-gray-500 break-all">{a.key}</p>
                   {summary && (
                     <p className="text-sm text-gray-700 leading-relaxed mt-1.5">
                       {summary.length > 200 ? summary.slice(0, 200) + "…" : summary}
                     </p>
                   )}
                 </div>
-                <div className="text-right flex-shrink-0 text-xs text-gray-400">
+                <div className="text-left sm:text-right flex-shrink-0 text-xs text-gray-400">
                   <p>{new Date(a.updated_at).toLocaleDateString()}</p>
                 </div>
               </div>

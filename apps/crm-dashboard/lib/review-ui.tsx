@@ -23,7 +23,7 @@ export type ReviewField = {
 };
 
 export function chipClass(tone: Tone = "gray"): string {
-  return `px-2 py-0.5 rounded-full text-xs font-medium ${TONE_CLASSES[tone]}`;
+  return `px-2 py-0.5 rounded-full text-xs font-medium [overflow-wrap:anywhere] ${TONE_CLASSES[tone]}`;
 }
 
 export function ReviewHeader({
@@ -43,14 +43,14 @@ export function ReviewHeader({
 }) {
   return (
     <section className="bg-white rounded-lg border border-gray-200 p-4 mb-5">
-      <div className="flex items-start justify-between gap-4 mb-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-3">
         <div className="min-w-0">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">{eyebrow}</p>
           <h1 className="text-lg font-semibold text-gray-900 leading-snug">{title}</h1>
           {subtitle && <p className="font-mono text-xs text-gray-500 mt-1 break-all">{subtitle}</p>}
         </div>
         {warnings.length > 0 && (
-          <div className="flex flex-wrap justify-end gap-1.5 flex-shrink-0 max-w-xs">
+          <div className="flex flex-wrap gap-1.5 sm:justify-end sm:flex-shrink-0 sm:max-w-xs">
             {warnings.map((warning) => (
               <span key={warning.label} className={chipClass(warning.tone ?? "amber")} title={warning.title}>
                 {warning.label}
@@ -93,7 +93,7 @@ export function ActiveFilterSummary({
 }) {
   if (filters.length === 0) return null;
   return (
-    <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 mb-4 flex items-center justify-between gap-3">
+    <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-gray-500 uppercase tracking-wide">Active filters</span>
         {filters.map((filter) => (
@@ -103,7 +103,7 @@ export function ActiveFilterSummary({
         ))}
         <span className="text-xs text-gray-400">{resultCount} shown</span>
       </div>
-      <a href={clearHref} className="text-xs font-medium text-gray-500 hover:text-gray-900 flex-shrink-0">
+      <a href={clearHref} className="inline-flex min-h-10 items-center text-xs font-medium text-gray-500 hover:text-gray-900 sm:flex-shrink-0">
         Clear all
       </a>
     </div>

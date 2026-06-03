@@ -107,7 +107,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
 
   return (
     <div className="max-w-6xl">
-      <a href="/artifacts" className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block">
+      <a href="/artifacts" className="inline-flex min-h-10 items-center text-sm text-gray-500 hover:text-gray-700 mb-4">
         ← Artifacts
       </a>
 
@@ -138,6 +138,53 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
         </div>
       </div>
 
+      <details className="lg:hidden bg-white rounded-lg border border-gray-200 mb-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-900">
+          <span>Blocks</span>
+          <span className="text-xs font-normal text-gray-400">{blocks.length}</span>
+        </summary>
+        <div className="border-t border-gray-100 p-3">
+          {blockNav.length > 0 ? (
+            <ol className="space-y-1">
+              {blockNav.map((block, index) => (
+                <li key={block.id}>
+                  <a
+                    href={`#${block.id}`}
+                    className="flex min-h-10 flex-col justify-center rounded px-2 py-2 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+                  >
+                    <span>
+                      <span className="font-mono text-gray-400 mr-1">{index + 1}.</span>
+                      <span className="font-mono text-gray-700 break-all">{block.path}</span>
+                    </span>
+                    {block.title && (
+                      <span className="pl-5 pt-0.5 text-gray-500 line-clamp-2">{block.title}</span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-gray-400">No blocks.</p>
+          )}
+          <div className="mt-3 border-t border-gray-100 pt-3 space-y-1">
+            {links.length > 0 && (
+              <a
+                href="#linked-records"
+                className="flex min-h-10 items-center rounded px-2 py-2 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                Linked records
+              </a>
+            )}
+            <a
+              href="#revision-history"
+              className="flex min-h-10 items-center rounded px-2 py-2 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              Revision history
+            </a>
+          </div>
+        </div>
+      </details>
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
         <main className="min-w-0">
           {/* Blocks — the review surface */}
@@ -157,17 +204,17 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                   }`}
                 >
                   <div className="border-b border-gray-100 px-4 py-3">
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <a
                           href={`#${id}`}
-                          className="font-mono text-xs text-gray-500 hover:text-gray-800 break-all"
+                          className="inline-flex min-h-10 min-w-10 items-center font-mono text-xs text-gray-500 hover:text-gray-800 break-all"
                         >
                           {b.path}
                         </a>
                         {b.title && <h3 className="text-sm font-semibold text-gray-900 mt-1">{b.title}</h3>}
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0 text-xs text-gray-400">
+                      <div className="flex flex-wrap items-center gap-2 flex-shrink-0 text-xs text-gray-400">
                         {archived && (
                           <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                             archived
@@ -240,7 +287,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
               {revisions.map((r) => {
                 const opCount = Array.isArray(r.ops) ? r.ops.length : 0;
                 return (
-                  <div key={r.id} className="p-4 flex items-start justify-between gap-3">
+                  <div key={r.id} className="p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
@@ -253,7 +300,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                       </div>
                       {r.summary && <p className="text-sm text-gray-700 mt-1">{r.summary}</p>}
                     </div>
-                    <div className="text-right flex-shrink-0 text-xs text-gray-400 space-y-1">
+                    <div className="text-left sm:text-right flex-shrink-0 text-xs text-gray-400 space-y-1">
                       <p>{new Date(r.created_at).toLocaleDateString()}</p>
                       <p>{opCount} op{opCount === 1 ? "" : "s"}</p>
                     </div>
@@ -273,7 +320,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
           </div>
         </main>
 
-        <aside className="lg:sticky lg:top-4 lg:self-start">
+        <aside className="hidden lg:block lg:sticky lg:top-4 lg:self-start">
           <nav className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h2 className="font-semibold text-sm text-gray-900">Blocks</h2>
@@ -285,10 +332,12 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                   <li key={block.id}>
                     <a
                       href={`#${block.id}`}
-                      className="block rounded px-2 py-1.5 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+                      className="flex min-h-10 flex-col justify-center rounded px-2 py-2 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
                     >
-                      <span className="font-mono text-gray-400 mr-1">{index + 1}.</span>
-                      <span className="font-mono text-gray-700 break-all">{block.path}</span>
+                      <span>
+                        <span className="font-mono text-gray-400 mr-1">{index + 1}.</span>
+                        <span className="font-mono text-gray-700 break-all">{block.path}</span>
+                      </span>
                       {block.title && (
                         <span className="block pl-5 pt-0.5 text-gray-500 line-clamp-2">{block.title}</span>
                       )}
@@ -303,14 +352,14 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
               {links.length > 0 && (
                 <a
                   href="#linked-records"
-                  className="block rounded px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                  className="flex min-h-10 items-center rounded px-2 py-2 text-xs text-gray-600 hover:bg-gray-50"
                 >
                   Linked records
                 </a>
               )}
               <a
                 href="#revision-history"
-                className="block rounded px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                className="flex min-h-10 items-center rounded px-2 py-2 text-xs text-gray-600 hover:bg-gray-50"
               >
                 Revision history
               </a>
