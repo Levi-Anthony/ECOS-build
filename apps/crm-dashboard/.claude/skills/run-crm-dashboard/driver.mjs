@@ -29,7 +29,7 @@ const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 // NOTE: "/" IS the contacts view (the "Contacts" nav link points to "/"). There is
 // no "/contacts" index route — app/contacts/ only holds a [id] detail page, so
 // "/contacts" returns 404. These are the real top-level pages (all 200):
-const ROUTES = ["/", "/people", "/brain", "/briefings", "/follow-ups", "/taste", "/weekly", "/it"];
+const ROUTES = ["/", "/people", "/brain", "/artifacts", "/briefings", "/follow-ups", "/taste", "/weekly", "/it"];
 
 const slug = (r) => (r === "/" ? "home" : r.replace(/^\//, "").replace(/\//g, "-"));
 

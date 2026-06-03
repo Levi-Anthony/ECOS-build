@@ -76,6 +76,46 @@ export type Thought = {
   };
 };
 
+// --- Artifact v2 (patch-based, block-addressable) ---
+// jsonb columns (metadata, ops) are intentionally loosely typed; read with guards.
+export type Artifact = {
+  id: string;
+  key: string;
+  title: string;
+  kind: string;
+  status: string;
+  current_version: number;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactBlock = {
+  id: string;
+  artifact_id: string;
+  path: string;
+  title: string | null;
+  content: string;
+  content_hash: string | null;
+  version: number;
+  sort_order: number;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactRevision = {
+  id: string;
+  artifact_id: string;
+  version: number;
+  base_version: number | null;
+  ops?: unknown;
+  summary: string | null;
+  actor: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+};
+
 export type ServiceLog = {
   id: string;
   contact_id: string;
