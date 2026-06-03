@@ -3,12 +3,29 @@ import { Hono, type Context } from "hono";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY")!;
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+function getSupabaseAdminKey(): string {
+  const secretKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (secretKeys) {
+    const parsed = JSON.parse(secretKeys) as Record<string, unknown>;
+    const defaultKey = parsed.default;
+    if (typeof defaultKey === "string" && defaultKey.length > 0) {
+      return defaultKey;
+    }
+    throw new Error("brain-middleware: SUPABASE_SECRET_KEYS.default is missing or empty");
+  }
+
+  const legacyKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacyKey) return legacyKey;
+
+  throw new Error("brain-middleware: missing SUPABASE_SECRET_KEYS or legacy SUPABASE_SERVICE_ROLE_KEY");
+}
+
+const supabase = createClient(SUPABASE_URL, getSupabaseAdminKey());
 
 // --- Shared helpers (same pipeline as open-brain-mcp) ---
 

@@ -18,18 +18,35 @@ import { getEmbedding as _getEmbedding } from "./lib/embedding.ts";
 import { extractMetadata as _extractMetadata } from "./lib/metadata.ts";
 
 // ─── Required env-var validation (fails fast at module load) ─────────────────
-// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected by Supabase
-// Edge Functions; we read them but don't enforce here. MCP_ACCESS_KEY and
-// OPENROUTER_API_KEY MUST be user-set; missing either is a hard failure.
-const REQUIRED_ENV = ["MCP_ACCESS_KEY", "OPENROUTER_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const;
+// SUPABASE_URL and SUPABASE_SECRET_KEYS are auto-injected by Supabase Edge
+// Functions. SUPABASE_SERVICE_ROLE_KEY is a legacy fallback for local/older
+// runtimes only. MCP_ACCESS_KEY and OPENROUTER_API_KEY MUST be user-set.
+const REQUIRED_ENV = ["MCP_ACCESS_KEY", "OPENROUTER_API_KEY", "SUPABASE_URL"] as const;
 for (const name of REQUIRED_ENV) {
   if (!Deno.env.get(name)) {
     throw new Error(`ecb-mcp: required env var ${name} is missing or empty`);
   }
 }
 
+function getSupabaseAdminKey(): string {
+  const secretKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (secretKeys) {
+    const parsed = JSON.parse(secretKeys) as Record<string, unknown>;
+    const defaultKey = parsed.default;
+    if (typeof defaultKey === "string" && defaultKey.length > 0) {
+      return defaultKey;
+    }
+    throw new Error("ecb-mcp: SUPABASE_SECRET_KEYS.default is missing or empty");
+  }
+
+  const legacyKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacyKey) return legacyKey;
+
+  throw new Error("ecb-mcp: missing SUPABASE_SECRET_KEYS or legacy SUPABASE_SERVICE_ROLE_KEY");
+}
+
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+export const SUPABASE_SERVICE_ROLE_KEY = getSupabaseAdminKey();
 export const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 export const MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY")!;
 

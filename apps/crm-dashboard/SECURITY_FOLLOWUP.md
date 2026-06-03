@@ -3,7 +3,8 @@
 ## TICKET: Browser-exposed service-role Supabase key
 
 **Severity:** High
-**Status:** Code remediation applied — key rotation still required.
+**Status:** Code remediation applied; Vercel and Edge Functions moved to modern server-only secret;
+legacy key deletion still required.
 
 ### Finding
 
@@ -34,11 +35,17 @@ independently and predates this feature.
 
 ### Remaining required closeout
 
-- Replace the exposed Supabase service-role key in Supabase. Current Supabase guidance is to create
-  a new `sb_secret_...` key in Project Settings -> API Keys and use that in trusted server
-  environments, then delete/disable the compromised legacy key once all server components are moved.
-- Update deployment environment variables to remove `NEXT_PUBLIC_SUPABASE_ANON_KEY` and add
-  `SUPABASE_SERVICE_ROLE_KEY` with the new server-only secret.
+- Replace the exposed Supabase service-role key in Supabase. Current Supabase guidance is to use a
+  new `sb_secret_...` key in Project Settings -> API Keys for trusted server environments, then
+  delete/disable the compromised legacy key once all server components are moved.
+- Vercel production has been verified to use server-only `SUPABASE_SERVICE_ROLE_KEY` with a modern
+  `sb_secret_...` value and no `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- Supabase Edge Functions now prefer `SUPABASE_SECRET_KEYS.default`, with the legacy
+  `SUPABASE_SERVICE_ROLE_KEY` only as a local/older-runtime fallback. Deployed functions:
+  `ecb-mcp`, `brain-middleware`, `ingest-thought`.
+- Final external closeout still required: delete/revoke the legacy project API key id
+  `service_role` in Supabase Dashboard / Management API and mark it compromised. The local CLI can
+  list keys but does not expose a delete command; direct Management API deletion needs a bearer PAT.
 - Keep `NEXT_PUBLIC_SUPABASE_URL`; the project URL is not secret.
 - Preview deployments intentionally do not need the server-only key at build time. If preview env vars
   are absent, the middleware fails closed unless `SITE_PASSWORD` is configured.
