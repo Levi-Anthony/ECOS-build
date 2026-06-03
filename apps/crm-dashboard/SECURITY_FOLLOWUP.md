@@ -34,9 +34,14 @@ independently and predates this feature.
 
 ### Remaining required closeout
 
-- Rotate the exposed Supabase service-role key in Supabase.
-- Update deployment environment variables to remove `NEXT_PUBLIC_SUPABASE_ANON_KEY` and add `SUPABASE_SERVICE_ROLE_KEY`.
+- Replace the exposed Supabase service-role key in Supabase. Current Supabase guidance is to create
+  a new `sb_secret_...` key in Project Settings -> API Keys and use that in trusted server
+  environments, then delete/disable the compromised legacy key once all server components are moved.
+- Update deployment environment variables to remove `NEXT_PUBLIC_SUPABASE_ANON_KEY` and add
+  `SUPABASE_SERVICE_ROLE_KEY` with the new server-only secret.
 - Keep `NEXT_PUBLIC_SUPABASE_URL`; the project URL is not secret.
+- Preview deployments intentionally do not need the server-only key at build time. If preview env vars
+  are absent, the middleware fails closed unless `SITE_PASSWORD` is configured.
 
 ### Alternative remediations not chosen
 
