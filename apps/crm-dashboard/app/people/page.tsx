@@ -1,4 +1,5 @@
-import { supabase, DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import { DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
 import { relativeAge, computeIntelStatus, computeStaleness, type IntelStatus, type ObsAgg, type SnapInfo } from "@/lib/logic";
 
 const STATUS_CHIP: Record<IntelStatus, string> = {

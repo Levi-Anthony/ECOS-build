@@ -1,4 +1,5 @@
-import { supabase, Briefing } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Briefing } from "@/lib/supabase";
 import { formatTime, formatDayLabel } from "@/lib/logic";
 
 const BRIEFING_COLORS: Record<string, string> = {

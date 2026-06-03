@@ -1,4 +1,6 @@
-import { supabase, Contact, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import { DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS } from "@/lib/supabase";
+import type { Contact } from "@/lib/supabase";
 import { isFollowUpSoon, isOverdue, aggregateObsCounts } from "@/lib/logic";
 
 export default async function ContactsPage({

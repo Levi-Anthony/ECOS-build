@@ -1,4 +1,5 @@
-import { supabase, Artifact } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Artifact } from "@/lib/supabase";
 
 const KIND_COLORS: Record<string, string> = {
   spec: "bg-violet-100 text-violet-800",

@@ -1,4 +1,5 @@
-import { supabase, Artifact, ArtifactBlock, ArtifactRevision } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Artifact, ArtifactBlock, ArtifactRevision } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 const KIND_COLORS: Record<string, string> = {

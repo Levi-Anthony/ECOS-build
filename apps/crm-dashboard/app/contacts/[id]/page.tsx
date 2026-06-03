@@ -1,4 +1,6 @@
-import { supabase, Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot, DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS, STAGE_COLORS } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import { DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS, STAGE_COLORS } from "@/lib/supabase";
+import type { Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 export default async function ContactDetailPage({ params }: { params: { id: string } }) {

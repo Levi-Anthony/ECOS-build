@@ -1,4 +1,6 @@
-import { supabase, Contact, DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import { DOMAIN_COLORS, DOMAIN_LABELS } from "@/lib/supabase";
+import type { Contact } from "@/lib/supabase";
 
 export default async function FollowUpsPage() {
   const today = new Date().toISOString().split("T")[0];

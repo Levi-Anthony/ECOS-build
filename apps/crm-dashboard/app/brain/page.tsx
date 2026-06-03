@@ -1,4 +1,5 @@
-import { supabase, Thought } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Thought } from "@/lib/supabase";
 
 const BRAIN_DOMAINS = [
   "ecos-architecture",

@@ -3,11 +3,11 @@
 ## TICKET: Browser-exposed service-role Supabase key
 
 **Severity:** High
-**Status:** Open — pre-existing, surfaced (not introduced) by the Artifacts Review UI work.
+**Status:** Code remediation applied — key rotation still required.
 
 ### Finding
 
-`apps/crm-dashboard/lib/supabase.ts` builds its single client from
+Previously, `apps/crm-dashboard/lib/supabase.ts` built its single client from
 `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Empirically, that "anon" key
 is actually a **service-role key**: the `/brain` page renders real `thoughts` rows, and
 `thoughts` is gated by an `auth.role() = 'service_role'` RLS policy that a plain anon/user
@@ -25,14 +25,20 @@ independently and predates this feature.
 > authenticated REST/session-cookie gateway. Do not keep service role in `NEXT_PUBLIC_`
 > env vars.
 
-### Possible remediations (out of scope for the Artifacts UI pass)
+### Remediation applied
 
-- Move all reads to a server-only Supabase client, with the service-role key in a
-  non-public env var (no `NEXT_PUBLIC_` prefix), accessed only from Server Components /
-  route handlers.
+- Runtime Supabase client creation moved to `apps/crm-dashboard/lib/supabase-server.ts`.
+- The service-role key is now read from `SUPABASE_SERVICE_ROLE_KEY`, which is not public-prefixed.
+- Server Component pages import the runtime client from the server-only module.
+- Shared TypeScript types/constants remain in `apps/crm-dashboard/lib/supabase.ts` for tests and page rendering.
+
+### Remaining required closeout
+
+- Rotate the exposed Supabase service-role key in Supabase.
+- Update deployment environment variables to remove `NEXT_PUBLIC_SUPABASE_ANON_KEY` and add `SUPABASE_SERVICE_ROLE_KEY`.
+- Keep `NEXT_PUBLIC_SUPABASE_URL`; the project URL is not secret.
+
+### Alternative remediations not chosen
+
 - Or issue a real anon key and add explicit read-only RLS policies for the tables the
   dashboard needs.
-- Rotate the currently-exposed key once the refactor lands.
-
-**Do not attempt the refactor as part of the Artifacts Review UI change.** This ticket is
-the deliverable; the fix is a separate security task.

@@ -1,4 +1,6 @@
-import { supabase, DOMAIN_COLORS, DOMAIN_LABELS, STAGE_COLORS, BRAIN_DOMAIN_COLORS, BRAIN_DOMAIN_LABELS, Briefing } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import { DOMAIN_COLORS, DOMAIN_LABELS, STAGE_COLORS, BRAIN_DOMAIN_COLORS, BRAIN_DOMAIN_LABELS } from "@/lib/supabase";
+import type { Briefing } from "@/lib/supabase";
 import { relativeAge, weekLabel, aggregateUnbilled } from "@/lib/logic";
 
 const BRAIN_DOMAINS = [

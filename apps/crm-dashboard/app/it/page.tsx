@@ -1,4 +1,5 @@
-import { supabase, Contact, ServiceLog } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Contact, ServiceLog } from "@/lib/supabase";
 import { aggregateLastService, aggregateUnbilled } from "@/lib/logic";
 
 export default async function ITPage() {

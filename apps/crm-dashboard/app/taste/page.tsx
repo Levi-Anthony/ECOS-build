@@ -1,4 +1,5 @@
-import { supabase, TastePreference } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { TastePreference } from "@/lib/supabase";
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-800",

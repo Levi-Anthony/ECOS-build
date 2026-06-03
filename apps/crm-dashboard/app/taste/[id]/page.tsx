@@ -1,4 +1,5 @@
-import { supabase, TastePreference, TasteEvolution } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { TastePreference, TasteEvolution } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 const STATUS_COLORS: Record<string, string> = {

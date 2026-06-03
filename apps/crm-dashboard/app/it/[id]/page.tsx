@@ -1,4 +1,5 @@
-import { supabase, Contact, ServiceLog, BillingEntry } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-server";
+import type { Contact, ServiceLog, BillingEntry } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
 const SERVICE_TYPE_COLORS: Record<string, string> = {
