@@ -21,7 +21,7 @@ server-rendered (Next 14 App Router), Tailwind, no client components; data via t
 | 2 | Block sections + sticky TOC (artifact detail) | artifacts | DONE (Codex, b43edb0) | Codex | b43edb0 |
 | 3 | Artifacts responsive / mobile | artifacts+mobile | DONE (Codex, 97d288c) | Codex | 97d288c |
 | 4 | Artifacts list: search + summary header | artifacts | DONE (Codex, 232260c) | Codex | 232260c |
-| 5 | App-wide mobile pass (table pages) | mobile | PENDING | — | — |
+| 5 | App-wide mobile pass (table pages) | mobile | IN PROGRESS (Codex, 2026-06-03) | Codex | — |
 | 6 | Cross-app visual consistency (optional) | polish | PENDING | — | — |
 
 Status values: `PENDING` · `IN PROGRESS (agent, date)` · `DONE (agent, sha)` · `BLOCKED (reason)`.
