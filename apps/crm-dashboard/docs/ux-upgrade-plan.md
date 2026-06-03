@@ -18,7 +18,7 @@ server-rendered (Next 14 App Router), Tailwind, no client components; data via t
 |---|--------|----------|--------|-------|--------|
 | 0 | Verification harness through the gate | enabler | DONE | Claude Code | 8737b5f |
 | 1 | Markdown rendering in artifact blocks | artifacts | DONE | Claude Code | 7318e5c |
-| 2 | Block sections + sticky TOC (artifact detail) | artifacts | PENDING | — | — |
+| 2 | Block sections + sticky TOC (artifact detail) | artifacts | IN PROGRESS (Codex, 2026-06-03) | Codex | — |
 | 3 | Artifacts responsive / mobile | artifacts+mobile | PENDING | — | — |
 | 4 | Artifacts list: search + summary header | artifacts | PENDING | — | — |
 | 5 | App-wide mobile pass (table pages) | mobile | PENDING | — | — |
