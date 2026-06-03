@@ -32,13 +32,13 @@ export default async function ITPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-xl font-semibold">IT Clients</h1>
         <span className="text-sm text-gray-500">{clients.length} active client{clients.length !== 1 ? "s" : ""}</span>
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-500">Active clients</p>
           <p className="text-2xl font-semibold mt-1">{clients.length}</p>
@@ -63,8 +63,8 @@ export default async function ITPage() {
               .map((c) => {
                 const { count, totalMin } = unbilledByContact[c.id];
                 return (
-                  <div key={c.id} className="flex items-center justify-between">
-                    <a href={`/it/${c.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-800">
+                  <div key={c.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <a href={`/it/${c.id}`} className="inline-flex min-h-10 items-center text-sm font-medium text-blue-600 hover:text-blue-800">
                       {c.name}
                     </a>
                     <div className="text-sm text-amber-700">
@@ -79,7 +79,48 @@ export default async function ITPage() {
 
       {/* Client list */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="divide-y divide-gray-100 md:hidden">
+          {clients.map((c) => {
+            const unbilled = unbilledByContact[c.id];
+            return (
+              <article key={c.id} className="p-4">
+                <a href={`/it/${c.id}`} className="inline-flex min-h-10 items-center font-medium text-blue-600 hover:text-blue-800 [overflow-wrap:anywhere]">
+                  {c.name}
+                </a>
+                {(c.company || c.title) && (
+                  <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">
+                    {c.company}{c.company && c.title && " · "}{c.title}
+                  </p>
+                )}
+                {(c.email || c.phone) && (
+                  <p className="mt-2 text-sm text-gray-500 [overflow-wrap:anywhere]">
+                    {c.email && <a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a>}
+                    {c.email && c.phone && <span className="mx-1 text-gray-300">·</span>}
+                    {c.phone && <span>{c.phone}</span>}
+                  </p>
+                )}
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Last service</dt>
+                    <dd className="text-gray-600">
+                      {lastServiceByContact[c.id] ? new Date(lastServiceByContact[c.id]).toLocaleDateString() : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Unbilled</dt>
+                    <dd className={unbilled ? "font-medium text-amber-700" : "text-gray-400"}>
+                      {unbilled ? `${unbilled.count} log${unbilled.count !== 1 ? "s" : ""} · ${(unbilled.totalMin / 60).toFixed(1)}h` : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
+          {clients.length === 0 && (
+            <div className="p-8 text-center text-gray-400">No active IT clients.</div>
+          )}
+        </div>
+        <table className="hidden w-full text-sm md:table">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>

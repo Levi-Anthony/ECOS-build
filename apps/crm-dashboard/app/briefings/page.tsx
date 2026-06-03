@@ -73,7 +73,7 @@ export default async function BriefingsPage({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-4">
         <h1 className="text-xl font-semibold">Briefings</h1>
         <span className="text-sm text-gray-500">Last 14 days · {all.length} total · {responseRate}% responded</span>
       </div>
@@ -82,7 +82,7 @@ export default async function BriefingsPage({
       <div className="flex gap-2 flex-wrap mb-6">
         <a
           href="/briefings"
-          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${!activeType ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+          className={`inline-flex min-h-10 items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${!activeType ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
         >
           All
         </a>
@@ -90,7 +90,7 @@ export default async function BriefingsPage({
           <a
             key={t}
             href={`/briefings?type=${t}`}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${activeType === t ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+            className={`inline-flex min-h-10 items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${activeType === t ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
           >
             {BRIEFING_LABELS[t] ?? t}
           </a>
@@ -98,7 +98,7 @@ export default async function BriefingsPage({
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {[
           { label: "Sent", value: all.length },
           { label: "Responded", value: responded },
@@ -131,7 +131,7 @@ export default async function BriefingsPage({
                     <div key={b.id} className="bg-white rounded-lg border border-gray-200 flex overflow-hidden">
                       <div className={`w-1 flex-shrink-0 ${BRIEFING_BAR[b.briefing_type] ?? "bg-gray-300"}`} />
                       <div className="flex-1 px-4 py-3">
-                        <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${BRIEFING_COLORS[b.briefing_type] ?? "bg-gray-100 text-gray-700"}`}>
                             {BRIEFING_LABELS[b.briefing_type] ?? b.briefing_type}
                           </span>

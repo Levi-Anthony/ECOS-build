@@ -103,7 +103,7 @@ export default async function PeoplePage({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-xl font-semibold">
           <span className="text-emerald-500">◉</span> People Intel
         </h1>
@@ -111,7 +111,7 @@ export default async function PeoplePage({
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-500">Contacts with intel</p>
           <p className="text-2xl font-semibold mt-1">{totalSeeded}</p>
@@ -132,7 +132,7 @@ export default async function PeoplePage({
           <a
             key={key}
             href={`/people${key !== "all" ? `?filter=${key}` : ""}`}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${filter === key ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+            className={`inline-flex min-h-10 items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${filter === key ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
           >
             {label}
           </a>
@@ -150,7 +150,65 @@ export default async function PeoplePage({
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="divide-y divide-gray-100 md:hidden">
+            {visible.map((c) => (
+              <article
+                key={c.id}
+                className={`p-4 ${c.administrative_status === "administrative_closed" ? "opacity-50" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <a href={`/contacts/${c.id}`} className="inline-flex min-h-10 min-w-[40px] items-center font-medium text-blue-600 hover:text-blue-800 [overflow-wrap:anywhere]">
+                    {c.name}
+                  </a>
+                  <span className={`mt-2 inline-flex flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[c.status]}`}>
+                    {STATUS_LABEL[c.status]}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${DOMAIN_COLORS[c.relationship_domain] ?? "bg-gray-100 text-gray-700"}`}>
+                    {DOMAIN_LABELS[c.relationship_domain] ?? c.relationship_domain}
+                  </span>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Observations</dt>
+                    <dd className="text-gray-700">
+                      {c.obs ? (
+                        <>
+                          <span className="font-medium">{c.obs.total}</span>
+                          <span className="text-xs text-gray-400 ml-1">
+                            {[
+                              c.obs.facts > 0 && `${c.obs.facts}f`,
+                              c.obs.interpretations > 0 && `${c.obs.interpretations}i`,
+                              c.obs.strategies > 0 && `${c.obs.strategies}s`,
+                            ].filter(Boolean).join(" · ")}
+                          </span>
+                        </>
+                      ) : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Last observed</dt>
+                    <dd className="text-gray-600">{c.obs ? relativeAge(c.obs.lastObserved) : "—"}</dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-xs uppercase text-gray-400">Snapshot</dt>
+                    <dd className="text-gray-600">
+                      {c.snap ? (
+                        <>
+                          <span className="text-xs">v{c.snap.version} · {relativeAge(c.snap.created_at)}</span>
+                          {(c.newObsSince ?? 0) > 0 && (
+                            <span className="ml-1 text-xs text-amber-500">+{c.newObsSince} new</span>
+                          )}
+                        </>
+                      ) : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <table className="hidden w-full text-sm md:table">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>

@@ -44,21 +44,21 @@ export default async function FollowUpsPage() {
   }
 
   const ContactRow = ({ contact }: { contact: Contact }) => (
-    <div className="flex items-start justify-between py-2.5 border-b border-gray-50 last:border-0">
-      <div>
-        <a href={`/contacts/${contact.id}`} className="font-medium text-blue-600 hover:text-blue-800 text-sm">
+    <div className="flex flex-col gap-2 py-2.5 border-b border-gray-50 last:border-0 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <a href={`/contacts/${contact.id}`} className="inline-flex min-h-10 min-w-[40px] items-center font-medium text-blue-600 hover:text-blue-800 text-sm [overflow-wrap:anywhere]">
           {contact.name}
         </a>
         {(contact.company || contact.title) && (
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-500 [overflow-wrap:anywhere]">
             {contact.title}{contact.title && contact.company && " · "}{contact.company}
           </p>
         )}
         {contact.email && (
-          <a href={`mailto:${contact.email}`} className="text-xs text-gray-400 hover:text-gray-600">{contact.email}</a>
+          <a href={`mailto:${contact.email}`} className="text-xs text-gray-400 hover:text-gray-600 [overflow-wrap:anywhere]">{contact.email}</a>
         )}
       </div>
-      <div className="text-right ml-4 flex-shrink-0">
+      <div className="flex-shrink-0 sm:ml-4 sm:text-right">
         <p className={`text-sm font-medium ${contact.follow_up_date! < today ? "text-red-600" : "text-gray-700"}`}>
           {contact.follow_up_date}
         </p>
@@ -71,7 +71,7 @@ export default async function FollowUpsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-xl font-semibold">Follow-Ups</h1>
         <span className="text-sm text-gray-500">Next 14 days</span>
       </div>
@@ -93,18 +93,18 @@ export default async function FollowUpsPage() {
           <p className="text-xs text-amber-600 mb-3">Active contacts with no follow-up date and last contact &gt;60 days ago (or never contacted)</p>
           <div>
             {coldContacts!.map((c) => (
-              <div key={c.id} className="flex items-start justify-between py-2.5 border-b border-amber-100 last:border-0">
-                <div>
-                  <a href={`/contacts/${c.id}`} className="font-medium text-blue-600 hover:text-blue-800 text-sm">
+              <div key={c.id} className="flex flex-col gap-2 py-2.5 border-b border-amber-100 last:border-0 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <a href={`/contacts/${c.id}`} className="inline-flex min-h-10 min-w-[40px] items-center font-medium text-blue-600 hover:text-blue-800 text-sm [overflow-wrap:anywhere]">
                     {c.name}
                   </a>
                   {(c.company || c.title) && (
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-gray-500 [overflow-wrap:anywhere]">
                       {c.title}{c.title && c.company && " · "}{c.company}
                     </p>
                   )}
                 </div>
-                <div className="text-right ml-4 flex-shrink-0">
+                <div className="flex-shrink-0 sm:ml-4 sm:text-right">
                   <span className={`inline-flex px-1.5 py-0.5 rounded-full text-xs font-medium ${DOMAIN_COLORS[c.relationship_domain] ?? "bg-gray-100 text-gray-700"}`}>
                     {DOMAIN_LABELS[c.relationship_domain] ?? c.relationship_domain}
                   </span>

@@ -28,7 +28,7 @@ export default async function ContactsPage({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-xl font-semibold">Contacts</h1>
         <span className="text-sm text-gray-500">{contacts?.length ?? 0} total</span>
       </div>
@@ -37,7 +37,7 @@ export default async function ContactsPage({
       <div className="flex gap-2 flex-wrap mb-6">
         <a
           href="/"
-          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${!domain ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+          className={`inline-flex min-h-10 min-w-[40px] items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${!domain ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
         >
           All
         </a>
@@ -45,7 +45,7 @@ export default async function ContactsPage({
           <a
             key={d}
             href={`/?domain=${d}`}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${domain === d ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
+            className={`inline-flex min-h-10 min-w-[40px] items-center px-3 py-1 rounded-full text-sm font-medium transition-colors ${domain === d ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-gray-400"}`}
           >
             {DOMAIN_LABELS[d]}
           </a>
@@ -57,7 +57,77 @@ export default async function ContactsPage({
       )}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="divide-y divide-gray-100 md:hidden">
+          {(contacts as Contact[] | null)?.map((contact) => {
+            const followUpSoon = isFollowUpSoon(contact.follow_up_date);
+            const overdue = isOverdue(contact.follow_up_date);
+            return (
+              <article
+                key={contact.id}
+                className={`p-4 ${contact.administrative_status === "administrative_closed" ? "opacity-50" : ""} ${overdue ? "bg-red-50" : followUpSoon ? "bg-amber-50" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <a href={`/contacts/${contact.id}`} className="inline-flex min-h-10 min-w-[40px] items-center font-medium text-blue-600 hover:text-blue-800 [overflow-wrap:anywhere]">
+                      {contact.name}
+                    </a>
+                    {(contact.company || contact.title) && (
+                      <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">
+                        {contact.company}{contact.company && contact.title && " · "}{contact.title}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    {Array.isArray(contact.thought_links) && contact.thought_links.length > 0 && (
+                      <a
+                        href={`/brain?q=${encodeURIComponent(contact.name)}`}
+                        className="inline-flex min-h-10 min-w-[40px] items-center justify-center text-xs font-medium text-purple-600 hover:text-purple-800"
+                        title={`${contact.thought_links.length} BRAIN link(s) — search BRAIN`}
+                      >
+                        ◆{contact.thought_links.length}
+                      </a>
+                    )}
+                    {obsCountMap[contact.id] > 0 && (
+                      <a
+                        href={`/contacts/${contact.id}#observations`}
+                        className="inline-flex min-h-10 min-w-[40px] items-center justify-center text-xs font-medium text-emerald-600 hover:text-emerald-800"
+                        title={`${obsCountMap[contact.id]} observation(s)`}
+                      >
+                        ◉{obsCountMap[contact.id]}
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${DOMAIN_COLORS[contact.relationship_domain] ?? "bg-gray-100 text-gray-700"}`}>
+                    {DOMAIN_LABELS[contact.relationship_domain] ?? contact.relationship_domain}
+                  </span>
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[contact.administrative_status] ?? "bg-gray-100 text-gray-700"}`}>
+                    {STATUS_LABELS[contact.administrative_status] ?? contact.administrative_status}
+                  </span>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Follow-up</dt>
+                    <dd className={overdue ? "font-medium text-red-600" : followUpSoon ? "font-medium text-amber-600" : "text-gray-600"}>
+                      {contact.follow_up_date ?? "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-gray-400">Last contact</dt>
+                    <dd className="text-gray-600">
+                      {contact.last_contacted ? new Date(contact.last_contacted).toLocaleDateString() : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
+          {(!contacts || contacts.length === 0) && (
+            <div className="p-8 text-center text-gray-400">No contacts found.</div>
+          )}
+        </div>
+        <table className="hidden w-full text-sm md:table">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>

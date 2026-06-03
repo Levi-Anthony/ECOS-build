@@ -103,7 +103,7 @@ export default async function WeeklyPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold">Weekly Review</h1>
         <span className="text-sm text-gray-500">{weekLabel()}</span>
       </div>
@@ -162,7 +162,7 @@ export default async function WeeklyPage() {
             {openLoops.map((t) => {
               const domain = (t.metadata as { domain?: string })?.domain;
               return (
-                <div key={t.id} className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex items-start gap-3">
+                <div key={t.id} className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
                   {domain && (
                     <span className={`mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${BRAIN_DOMAIN_COLORS[domain] ?? "bg-gray-100 text-gray-700"}`}>
                       {BRAIN_DOMAIN_LABELS[domain] ?? domain}
@@ -189,9 +189,9 @@ export default async function WeeklyPage() {
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-50">
             {followUps.map((c) => (
-              <div key={c.id} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <a href={`/contacts/${c.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-800">
+              <div key={c.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <a href={`/contacts/${c.id}`} className="inline-flex min-h-10 items-center text-sm font-medium text-blue-600 hover:text-blue-800 [overflow-wrap:anywhere]">
                     {c.name}
                   </a>
                   <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${DOMAIN_COLORS[c.relationship_domain] ?? "bg-gray-100 text-gray-700"}`}>
@@ -216,7 +216,29 @@ export default async function WeeklyPage() {
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="divide-y divide-gray-100 md:hidden">
+              {opps.map((o) => (
+                <article key={o.id} className="p-4">
+                  <p className="font-medium text-gray-900 [overflow-wrap:anywhere]">{o.title}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_COLORS[o.stage] ?? "bg-gray-100 text-gray-700"}`}>
+                      {o.stage}
+                    </span>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs uppercase text-gray-400">Value</dt>
+                      <dd className="text-gray-600">{o.value != null ? `$${Number(o.value).toLocaleString()}` : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase text-gray-400">Close</dt>
+                      <dd className="text-gray-600">{o.close_date ?? "—"}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+            <table className="hidden w-full text-sm md:table">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">Title</th>
@@ -257,18 +279,18 @@ export default async function WeeklyPage() {
           </div>
         ) : (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-medium text-amber-800">
                 {(totalUnbilledMin / 60).toFixed(1)} hrs unbilled across {unbilledContactIds.length} client{unbilledContactIds.length !== 1 ? "s" : ""}
               </span>
-              <a href="/it" className="text-sm text-blue-600 hover:text-blue-800">View IT →</a>
+              <a href="/it" className="inline-flex min-h-10 items-center text-sm text-blue-600 hover:text-blue-800">View IT →</a>
             </div>
             <div className="space-y-1.5">
               {unbilledContactIds.map((cid) => {
                 const { count, totalMin } = unbilledByContact[cid];
                 return (
-                  <div key={cid} className="flex items-center justify-between text-sm">
-                    <a href={`/it/${cid}`} className="text-blue-600 hover:text-blue-800">
+                  <div key={cid} className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <a href={`/it/${cid}`} className="inline-flex min-h-10 items-center text-blue-600 hover:text-blue-800 [overflow-wrap:anywhere]">
                       {unbilledContactNames[cid] ?? cid}
                     </a>
                     <span className="text-amber-700">{count} log{count !== 1 ? "s" : ""} · {(totalMin / 60).toFixed(1)}h</span>
@@ -283,11 +305,11 @@ export default async function WeeklyPage() {
       {/* Section 6 — Pulse */}
       <section>
         <h2 className="text-base font-semibold text-gray-700 mb-3">Life Engine</h2>
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between">
+        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm text-gray-600">
             {briefingTotal} briefings sent · {briefingResponded} responded ({briefingRate}%) this week
           </span>
-          <a href="/briefings" className="text-sm text-blue-600 hover:text-blue-800">View all →</a>
+          <a href="/briefings" className="inline-flex min-h-10 items-center text-sm text-blue-600 hover:text-blue-800">View all →</a>
         </div>
       </section>
     </div>
