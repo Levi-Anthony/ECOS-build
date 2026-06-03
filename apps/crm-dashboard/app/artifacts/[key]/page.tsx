@@ -14,6 +14,14 @@ const strArray = (meta: Record<string, unknown> | null | undefined, key: string)
   const v = meta?.[key];
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 };
+const anchorId = (path: string, index: number) => {
+  const slug = path
+    .replace(/^\//, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `block-${index + 1}${slug ? `-${slug}` : ""}`;
+};
 
 export default async function ArtifactDetailPage({ params }: { params: { key: string } }) {
   const key = decodeURIComponent(params.key);
@@ -91,9 +99,14 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
     if (link.linked_type === "contact") return `/contacts/${link.linked_id}`;
     return null;
   };
+  const blockNav = blocks.map((block, index) => ({
+    id: anchorId(block.path, index),
+    path: block.path,
+    title: block.title,
+  }));
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-6xl">
       <a href="/artifacts" className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block">
         ← Artifacts
       </a>
@@ -125,115 +138,185 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
         </div>
       </div>
 
-      {/* Blocks — the review surface */}
-      <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
-        Blocks ({blocks.length})
-      </h2>
-      <div className="space-y-3 mb-6">
-        {blocks.map((b) => {
-          const archived = str(b.metadata, "status") === "archived";
-          return (
-            <div
-              key={b.id}
-              className={`bg-white rounded-lg border border-gray-200 p-4 ${archived ? "opacity-60" : ""}`}
-            >
-              <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <span className="font-mono text-xs text-gray-500">{b.path}</span>
-                  {b.title && <span className="text-sm font-medium text-gray-800">{b.title}</span>}
-                  {archived && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                      archived
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0 text-xs text-gray-400">
-                  <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">v{b.version}</span>
-                  {b.content_hash && <span className="font-mono">{b.content_hash.slice(0, 8)}</span>}
-                </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
+        <main className="min-w-0">
+          {/* Blocks — the review surface */}
+          <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
+            Blocks ({blocks.length})
+          </h2>
+          <div className="space-y-4 mb-8">
+            {blocks.map((b, index) => {
+              const archived = str(b.metadata, "status") === "archived";
+              const id = anchorId(b.path, index);
+              return (
+                <section
+                  key={b.id}
+                  id={id}
+                  className={`scroll-mt-4 bg-white rounded-lg border border-gray-200 ${
+                    archived ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="border-b border-gray-100 px-4 py-3">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <a
+                          href={`#${id}`}
+                          className="font-mono text-xs text-gray-500 hover:text-gray-800 break-all"
+                        >
+                          {b.path}
+                        </a>
+                        {b.title && <h3 className="text-sm font-semibold text-gray-900 mt-1">{b.title}</h3>}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 text-xs text-gray-400">
+                        {archived && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            archived
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">v{b.version}</span>
+                        {b.content_hash && <span className="font-mono">{b.content_hash.slice(0, 8)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <Markdown>{b.content}</Markdown>
+                  </div>
+                </section>
+              );
+            })}
+            {blocks.length === 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-gray-400 text-sm">
+                No blocks.
               </div>
-              <Markdown>{b.content}</Markdown>
-            </div>
-          );
-        })}
-        {blocks.length === 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-gray-400 text-sm">
-            No blocks.
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Continuity */}
-      <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
-        Linked records ({links.length})
-      </h2>
-      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 mb-6">
-        {links.map((link) => {
-          const href = linkedHref(link);
-          const body = (
-            <div>
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className={chipClass("blue")}>artifact_link: {link.relationship_type}</span>
-                <span className={chipClass("gray")}>{link.linked_type}</span>
-                <span className="text-xs text-gray-400">{new Date(link.created_at).toLocaleDateString()}</span>
-              </div>
-              <p className="font-mono text-xs text-gray-600 break-all">{link.linked_id}</p>
-              {link.note && <p className="text-sm text-gray-700 mt-1">{link.note}</p>}
-            </div>
-          );
-
-          return href ? (
-            <a key={link.id} href={href} className="block p-4 hover:bg-gray-50 transition-colors">
-              {body}
-            </a>
-          ) : (
-            <div key={link.id} className="p-4">
-              {body}
-            </div>
-          );
-        })}
-        {links.length === 0 && (
-          <div className="p-6 text-center text-gray-400 text-sm">No explicit artifact_links rows.</div>
-        )}
-      </div>
-
-      {/* Revision history — the immutable ledger */}
-      <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
-        Revision history ({revisions.length})
-      </h2>
-      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 mb-6">
-        {revisions.map((r) => {
-          const opCount = Array.isArray(r.ops) ? r.ops.length : 0;
-          return (
-            <div key={r.id} className="p-4 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                    v{r.version}
-                  </span>
-                  {r.base_version !== null && (
-                    <span className="text-xs text-gray-400">from v{r.base_version}</span>
-                  )}
-                  {r.actor && <span className="text-xs text-gray-500">{r.actor}</span>}
+          {/* Continuity */}
+          <h2
+            id="linked-records"
+            className="scroll-mt-4 font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide"
+          >
+            Linked records ({links.length})
+          </h2>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 mb-8">
+            {links.map((link) => {
+              const href = linkedHref(link);
+              const body = (
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className={chipClass("blue")}>artifact_link: {link.relationship_type}</span>
+                    <span className={chipClass("gray")}>{link.linked_type}</span>
+                    <span className="text-xs text-gray-400">{new Date(link.created_at).toLocaleDateString()}</span>
+                  </div>
+                  <p className="font-mono text-xs text-gray-600 break-all">{link.linked_id}</p>
+                  {link.note && <p className="text-sm text-gray-700 mt-1">{link.note}</p>}
                 </div>
-                {r.summary && <p className="text-sm text-gray-700 mt-1">{r.summary}</p>}
-              </div>
-              <div className="text-right flex-shrink-0 text-xs text-gray-400 space-y-1">
-                <p>{new Date(r.created_at).toLocaleDateString()}</p>
-                <p>{opCount} op{opCount === 1 ? "" : "s"}</p>
-              </div>
-            </div>
-          );
-        })}
-        {revisions.length === 0 && (
-          <div className="p-6 text-center text-gray-400 text-sm">No revisions.</div>
-        )}
-      </div>
+              );
 
-      {/* Artifact ID — copyable */}
-      <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
-        <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Artifact ID</p>
-        <p className="font-mono text-sm text-gray-800 select-all break-all">{artifact.id}</p>
+              return href ? (
+                <a key={link.id} href={href} className="block p-4 hover:bg-gray-50 transition-colors">
+                  {body}
+                </a>
+              ) : (
+                <div key={link.id} className="p-4">
+                  {body}
+                </div>
+              );
+            })}
+            {links.length === 0 && (
+              <div className="p-6 text-center text-gray-400 text-sm">No explicit artifact_links rows.</div>
+            )}
+          </div>
+
+          {/* Revision history — the immutable ledger */}
+          <div
+            id="revision-history"
+            className="scroll-mt-4 bg-gray-50 rounded-lg border border-gray-200 p-4 mb-6"
+          >
+            <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
+              Revision history ({revisions.length})
+            </h2>
+            <div className="bg-white rounded-md border border-gray-200 divide-y divide-gray-100">
+              {revisions.map((r) => {
+                const opCount = Array.isArray(r.ops) ? r.ops.length : 0;
+                return (
+                  <div key={r.id} className="p-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
+                          v{r.version}
+                        </span>
+                        {r.base_version !== null && (
+                          <span className="text-xs text-gray-400">from v{r.base_version}</span>
+                        )}
+                        {r.actor && <span className="text-xs text-gray-500">{r.actor}</span>}
+                      </div>
+                      {r.summary && <p className="text-sm text-gray-700 mt-1">{r.summary}</p>}
+                    </div>
+                    <div className="text-right flex-shrink-0 text-xs text-gray-400 space-y-1">
+                      <p>{new Date(r.created_at).toLocaleDateString()}</p>
+                      <p>{opCount} op{opCount === 1 ? "" : "s"}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              {revisions.length === 0 && (
+                <div className="p-6 text-center text-gray-400 text-sm">No revisions.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Artifact ID — copyable */}
+          <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Artifact ID</p>
+            <p className="font-mono text-sm text-gray-800 select-all break-all">{artifact.id}</p>
+          </div>
+        </main>
+
+        <aside className="lg:sticky lg:top-4 lg:self-start">
+          <nav className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="font-semibold text-sm text-gray-900">Blocks</h2>
+              <span className="text-xs text-gray-400">{blocks.length}</span>
+            </div>
+            {blockNav.length > 0 ? (
+              <ol className="space-y-1">
+                {blockNav.map((block, index) => (
+                  <li key={block.id}>
+                    <a
+                      href={`#${block.id}`}
+                      className="block rounded px-2 py-1.5 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+                    >
+                      <span className="font-mono text-gray-400 mr-1">{index + 1}.</span>
+                      <span className="font-mono text-gray-700 break-all">{block.path}</span>
+                      {block.title && (
+                        <span className="block pl-5 pt-0.5 text-gray-500 line-clamp-2">{block.title}</span>
+                      )}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-sm text-gray-400">No blocks.</p>
+            )}
+            <div className="mt-4 border-t border-gray-100 pt-3 space-y-1">
+              {links.length > 0 && (
+                <a
+                  href="#linked-records"
+                  className="block rounded px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  Linked records
+                </a>
+              )}
+              <a
+                href="#revision-history"
+                className="block rounded px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                Revision history
+              </a>
+            </div>
+          </nav>
+        </aside>
       </div>
     </div>
   );
