@@ -3,6 +3,7 @@ import type { Artifact, ArtifactBlock, ArtifactLink, ArtifactRevision } from "@/
 import { relativeAge } from "@/lib/logic";
 import { ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
 import { Markdown } from "@/lib/markdown";
+import { CopyButton } from "@/lib/copy-button";
 import { notFound } from "next/navigation";
 
 // jsonb metadata is loosely typed — read fields with guards.
@@ -21,6 +22,13 @@ const anchorId = (path: string, index: number) => {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return `block-${index + 1}${slug ? `-${slug}` : ""}`;
+};
+
+// Reconstruct a standalone markdown document from the ordered blocks:
+// artifact title as an H1, then each block as an H2 section (title or path) + its content.
+const buildFullDoc = (title: string, blocks: ArtifactBlock[]): string => {
+  const sections = blocks.map((b) => `## ${b.title ?? b.path}\n\n${b.content}`);
+  return [`# ${title}`, ...sections].join("\n\n");
 };
 
 export default async function ArtifactDetailPage({ params }: { params: { key: string } }) {
@@ -188,9 +196,14 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
         <main className="min-w-0">
           {/* Blocks — the review surface */}
-          <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">
-            Blocks ({blocks.length})
-          </h2>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="font-semibold text-sm text-gray-500 uppercase tracking-wide">
+              Blocks ({blocks.length})
+            </h2>
+            {blocks.length > 0 && (
+              <CopyButton text={buildFullDoc(artifact.title, blocks)} label="Copy all" copiedLabel="Copied all" />
+            )}
+          </div>
           <div className="space-y-4 mb-8">
             {blocks.map((b, index) => {
               const archived = str(b.metadata, "status") === "archived";
@@ -222,6 +235,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                         )}
                         <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">v{b.version}</span>
                         {b.content_hash && <span className="font-mono">{b.content_hash.slice(0, 8)}</span>}
+                        <CopyButton text={b.content} label="Copy" />
                       </div>
                     </div>
                   </div>
