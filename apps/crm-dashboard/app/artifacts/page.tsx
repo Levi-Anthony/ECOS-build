@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Artifact } from "@/lib/supabase";
+import { ActiveFilterSummary, EmptyReviewState, type ReviewChip } from "@/lib/review-ui";
 
 const KIND_COLORS: Record<string, string> = {
   spec: "bg-violet-100 text-violet-800",
@@ -32,9 +33,9 @@ const str = (meta: Record<string, unknown> | null | undefined, key: string): str
 export default async function ArtifactsPage({
   searchParams,
 }: {
-  searchParams: { kind?: string };
+  searchParams: { kind?: string; status?: string };
 }) {
-  const { kind } = searchParams ?? {};
+  const { kind, status } = searchParams ?? {};
 
   let query = supabase
     .from("artifacts")
@@ -43,17 +44,35 @@ export default async function ArtifactsPage({
     .limit(200);
 
   if (kind) query = query.eq("kind", kind);
+  if (status) query = query.eq("status", status);
 
   const { data: artifacts, error } = await query;
+  const rows = (artifacts ?? []) as Artifact[];
 
   // Derive the kind pill set from a SEPARATE unfiltered query — building it from
   // the (possibly ?kind=-filtered) list would collapse it to a single kind.
-  const { data: allKinds } = await supabase.from("artifacts").select("id, kind");
+  const { data: allKinds } = await supabase.from("artifacts").select("id, kind, status");
   const kinds = Array.from(
     new Set((allKinds ?? []).map((a) => a.kind).filter(Boolean) as string[])
   ).sort();
+  const statuses = Array.from(
+    new Set((allKinds ?? []).map((a) => a.status).filter(Boolean) as string[])
+  ).sort();
 
-  const buildUrl = (k?: string) => (k ? `/artifacts?kind=${encodeURIComponent(k)}` : "/artifacts");
+  const buildUrl = (overrides: { kind?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    const merged = { kind, status, ...overrides };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v) params.set(k, v);
+    }
+    const s = params.toString();
+    return `/artifacts${s ? `?${s}` : ""}`;
+  };
+
+  const activeFilters = ([
+    kind ? { label: `kind: ${kind}`, tone: "purple" } : null,
+    status ? { label: `status: ${status}`, tone: status === "active" ? "emerald" : "gray" } : null,
+  ] as Array<ReviewChip | null>).filter((x): x is ReviewChip => x !== null);
 
   const FilterPill = ({ label, href, active }: { label: string; href: string; active: boolean }) => (
     <a
@@ -74,26 +93,35 @@ export default async function ArtifactsPage({
         <h1 className="text-xl font-semibold">
           <span className="text-violet-600">▤</span> Artifacts
         </h1>
-        <span className="text-sm text-gray-500">{artifacts?.length ?? 0} shown</span>
+        <span className="text-sm text-gray-500">{rows.length} shown</span>
       </div>
 
       {/* Kind filter */}
       <div className="flex gap-2 flex-wrap mb-6">
-        <FilterPill label="All kinds" href={buildUrl(undefined)} active={!kind} />
+        <FilterPill label="All kinds" href={buildUrl({ kind: undefined })} active={!kind} />
         {kinds.map((k) => (
-          <FilterPill key={k} label={k} href={buildUrl(k)} active={kind === k} />
+          <FilterPill key={k} label={k} href={buildUrl({ kind: k })} active={kind === k} />
+        ))}
+        <span className="w-px bg-gray-200 mx-1" />
+        <FilterPill label="All statuses" href={buildUrl({ status: undefined })} active={!status} />
+        {statuses.map((s) => (
+          <FilterPill key={s} label={s} href={buildUrl({ status: s })} active={status === s} />
         ))}
       </div>
+
+      <ActiveFilterSummary filters={activeFilters} clearHref="/artifacts" resultCount={rows.length} />
 
       {error && (
         <p className="text-red-600 text-sm mb-4">Error loading artifacts: {error.message}</p>
       )}
 
       <div className="space-y-3">
-        {(artifacts as Artifact[] | null)?.map((a) => {
+        {rows.map((a) => {
           const meta = a.metadata ?? {};
           const migratedFrom = str(meta, "migrated_from") ?? str(meta, "legacy_doc_type");
           const summary = str(meta, "summary");
+          const authorityLevel = str(meta, "authority_level");
+          const scope = str(meta, "scope");
           return (
             <a
               key={a.id}
@@ -122,6 +150,16 @@ export default async function ArtifactsPage({
                         migrated
                       </span>
                     )}
+                    {authorityLevel && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                        authority: {authorityLevel}
+                      </span>
+                    )}
+                    {scope && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                        scope: {scope}
+                      </span>
+                    )}
                   </div>
                   <p className="font-mono text-xs text-gray-500 truncate">{a.key}</p>
                   {summary && (
@@ -137,10 +175,12 @@ export default async function ArtifactsPage({
             </a>
           );
         })}
-        {(!artifacts || artifacts.length === 0) && !error && (
-          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-400">
-            No artifacts found.
-          </div>
+        {rows.length === 0 && !error && (
+          <EmptyReviewState
+            title="No artifacts found."
+            description={activeFilters.length > 0 ? "The active filters may be too narrow for the available artifact metadata." : "No artifacts are available."}
+            clearHref="/artifacts"
+          />
         )}
       </div>
     </div>

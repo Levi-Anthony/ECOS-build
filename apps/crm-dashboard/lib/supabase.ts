@@ -109,6 +109,16 @@ export type ArtifactRevision = {
   created_at: string;
 };
 
+export type ArtifactLink = {
+  id: string;
+  artifact_id: string;
+  linked_type: "thought" | "contact" | "entity" | "opportunity";
+  linked_id: string;
+  relationship_type: "governs" | "supplements" | "derived_from" | "implements" | "references";
+  note: string | null;
+  created_at: string;
+};
+
 export type ServiceLog = {
   id: string;
   contact_id: string;

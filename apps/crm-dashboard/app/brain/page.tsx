@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Thought } from "@/lib/supabase";
+import { ActiveFilterSummary, EmptyReviewState, chipClass, type ReviewChip } from "@/lib/review-ui";
 
 const BRAIN_DOMAINS = [
   "ecos-architecture",
@@ -67,6 +68,7 @@ export default async function BrainPage({
   if (q) query = query.ilike("content", `%${q}%`);
 
   const { data: thoughts, error } = await query;
+  const rows = (thoughts ?? []) as Thought[];
 
   const buildUrl = (overrides: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
@@ -77,6 +79,15 @@ export default async function BrainPage({
     const s = params.toString();
     return `/brain${s ? `?${s}` : ""}`;
   };
+
+  const activeFilters = ([
+    domain ? { label: `domain: ${domain}`, tone: "purple" } : null,
+    type ? { label: `type: ${type}`, tone: "gray" } : null,
+    horizon ? { label: `horizon: ${horizon}`, tone: "amber" } : null,
+    signal_type ? { label: `signal: ${signal_type}`, tone: "indigo" } : null,
+    q ? { label: `search: ${q}`, tone: "blue" } : null,
+    sort === "retrieval" ? { label: "sort: most retrieved", tone: "gray" } : null,
+  ] as Array<ReviewChip | null>).filter((x): x is ReviewChip => x !== null);
 
   const FilterPill = ({
     label,
@@ -126,7 +137,7 @@ export default async function BrainPage({
           >
             Most retrieved
           </a>
-          <span className="text-sm text-gray-500">{thoughts?.length ?? 0} shown</span>
+          <span className="text-sm text-gray-500">{rows.length} shown</span>
         </div>
       </div>
 
@@ -175,12 +186,14 @@ export default async function BrainPage({
         ))}
       </div>
 
+      <ActiveFilterSummary filters={activeFilters} clearHref="/brain" resultCount={rows.length} />
+
       {error && (
         <p className="text-red-600 text-sm mb-4">Error loading thoughts: {error.message}</p>
       )}
 
       <div className="space-y-3">
-        {(thoughts as Thought[] | null)?.map((t) => {
+        {rows.map((t) => {
           const meta = t.metadata ?? {};
           const needsAttention = meta.needs_split || meta.metadata_fallback;
           return (
@@ -213,10 +226,16 @@ export default async function BrainPage({
                       </span>
                     )}
                     {needsAttention && (
-                      <span className="text-amber-500 text-xs font-medium" title={meta.needs_split ? "needs split" : "metadata fallback"}>
-                        ⚠
+                      <span className={chipClass("amber")} title={meta.needs_split ? "needs split" : "metadata fallback"}>
+                        {meta.needs_split ? "needs split" : "metadata fallback"}
                       </span>
                     )}
+                    <span
+                      className={chipClass(t.source_id ? "blue" : "gray")}
+                      title={t.source_id ? `source_id: ${t.source_id}` : "No source_id on this row"}
+                    >
+                      {t.source_id ? "source" : "no source"}
+                    </span>
                   </div>
                   <p className="text-sm text-gray-800 leading-relaxed">
                     {t.content.length > 200 ? t.content.slice(0, 200) + "…" : t.content}
@@ -232,6 +251,11 @@ export default async function BrainPage({
                         {person}
                       </span>
                     ))}
+                    {meta.signal_type && (
+                      <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                        {meta.signal_type}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 text-xs text-gray-400 space-y-1">
@@ -242,10 +266,12 @@ export default async function BrainPage({
             </a>
           );
         })}
-        {(!thoughts || thoughts.length === 0) && !error && (
-          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-400">
-            No thoughts found.
-          </div>
+        {rows.length === 0 && !error && (
+          <EmptyReviewState
+            title="No thoughts found."
+            description={activeFilters.length > 0 ? "The active filters may be too narrow or metadata may be incomplete." : "No BRAIN entries are available."}
+            clearHref="/brain"
+          />
         )}
       </div>
     </div>
