@@ -23,6 +23,7 @@ server-rendered (Next 14 App Router), Tailwind, no client components; data via t
 | 4 | Artifacts list: search + summary header | artifacts | DONE (Codex, 232260c) | Codex | 232260c |
 | 5 | App-wide mobile pass (table pages) | mobile | DONE (Codex, 804c7c8) | Codex | 804c7c8 |
 | 6 | Cross-app visual consistency (optional) | polish | DONE (Claude Code, 789b005) | Claude Code | 789b005 |
+| 7 | Artifact v2 cleanup / v1 retirement Phase A | cleanup | IN PROGRESS (Codex, 2026-06-04) | Codex |  |
 
 Status values: `PENDING` · `IN PROGRESS (agent, date)` · `DONE (agent, sha)` · `BLOCKED (reason)`.
 
@@ -93,6 +94,13 @@ Invariants: every sprint leaves `main` green (`npm test` + build). Never two `IN
 - **Files:** shared UI in `lib/` + per-page tweaks.
 - **Acceptance:** Contacts/Artifacts/IT visually match the People-Intel bar.
 - **Verify:** desktop + mobile screenshots. **Deps:** 3, 5 (do after mobile so layout is settled).
+
+### Sprint 7 — Artifact v2 cleanup / v1 retirement Phase A  *(cleanup)*
+**One finished thing:** active runtime dependencies on the v1 artifact engine are removed or blocked while v1 storage remains available for rollback inspection.
+- **Files:** Supabase migration, BRAIN thought updates for stale artifact-schema atoms.
+- **Do:** repoint `handoff_snapshots.artifact_id` from `canonical_artifacts(id)` to `artifacts(id)` after deployed-DB dependency preflight; keep `artifact_links` active; retire `canonical_artifacts`, `artifact_versions`, `artifact_chunks`, and `match_artifact_chunks` from active use by revoking write/execute privileges; update stale BRAIN atoms `0c1f8b57-9cf2-4255-8c1d-2c29d7d46023` and `833c15f5-e380-4e03-996a-ec5efba9b1c7` to explicit Artifact v2 supersession statements.
+- **Acceptance:** v2 tools and dashboard artifact pages still work; v1 tables remain readable but not writable by `service_role`; `match_artifact_chunks` is not executable by `service_role`; BRAIN readback confirms the stale atoms now state the v2 reality.
+- **Verify:** migration preflight + postflight SQL assertions; `npm test`; `npm run build`; `/artifacts` and one artifact detail page still render. **Deps:** 6.
 
 ---
 
