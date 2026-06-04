@@ -23,7 +23,7 @@ server-rendered (Next 14 App Router), Tailwind, no client components; data via t
 | 4 | Artifacts list: search + summary header | artifacts | DONE (Codex, 232260c) | Codex | 232260c |
 | 5 | App-wide mobile pass (table pages) | mobile | DONE (Codex, 804c7c8) | Codex | 804c7c8 |
 | 6 | Cross-app visual consistency (optional) | polish | DONE (Claude Code, 789b005) | Claude Code | 789b005 |
-| 7 | Artifact v2 cleanup / v1 retirement Phase A | cleanup | IN PROGRESS (Codex, 2026-06-04) | Codex |  |
+| 7 | Artifact v2 cleanup / v1 retirement Phase A | cleanup | DONE (Codex, 26a7b17) | Codex | 26a7b17 |
 
 Status values: `PENDING` · `IN PROGRESS (agent, date)` · `DONE (agent, sha)` · `BLOCKED (reason)`.
 
