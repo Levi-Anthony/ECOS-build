@@ -41,13 +41,25 @@ export function readArtifactActionFeedback(params: FeedbackSearchParams): Artifa
 export function artifactActionErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
-  if (/Human authority path is not configured/i.test(message)) {
+  if (/HUMAN_AUTHORITY_NOT_READY:missing_configuration|HUMAN_AUTHORITY_MISSING_CONFIGURATION/i.test(message)) {
     return "Human editing is not configured in this runtime. No changes were applied.";
+  }
+  if (/HUMAN_AUTHORITY_NOT_READY:authentication_failed|HUMAN_AUTHORITY_AUTHENTICATION_FAILED/i.test(message)) {
+    return "Human editing could not authenticate the reviewer account. No changes were applied.";
+  }
+  if (/HUMAN_AUTHORITY_NOT_READY:authority_missing/i.test(message)) {
+    return "Human editing is unavailable because the reviewer authority mapping is missing. No changes were applied.";
+  }
+  if (/HUMAN_AUTHORITY_NOT_READY:authority_inactive/i.test(message)) {
+    return "Human editing is unavailable because the reviewer authority mapping is inactive. No changes were applied.";
+  }
+  if (/HUMAN_AUTHORITY_NOT_READY:unknown_error/i.test(message)) {
+    return "Human editing readiness could not be verified. No changes were applied.";
   }
   if (/VERSION_CONFLICT|HASH_CONFLICT/i.test(message)) {
     return "This artifact changed after the form was opened. No changes were applied. Review the refreshed version and try again.";
   }
-  if (/HUMAN_AUTH|Human authority authentication failed/i.test(message)) {
+  if (/HUMAN_AUTH/i.test(message)) {
     return "Human edit authorization failed. No changes were applied. Check the reviewer account and authority mapping.";
   }
   if (/INVALID_STATUS_TRANSITION/i.test(message)) {

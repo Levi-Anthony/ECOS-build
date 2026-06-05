@@ -5,7 +5,7 @@ import { artifactOpLabel, currentBlockForOp, proposedContentForOp } from "@/lib/
 import { ActionFeedbackBanner, chipClass, ReviewHeader, type ReviewChip } from "@/lib/review-ui";
 import { reviewArtifactProposalAction } from "@/app/artifacts/actions";
 import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
-import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
+import { getHumanAuthorityReadiness, humanAuthorityReadinessMessage } from "@/lib/human-authority";
 
 export default async function ArtifactProposalDetail({
   params,
@@ -16,9 +16,12 @@ export default async function ArtifactProposalDetail({
 }) {
   const [{ id }, actionParams] = await Promise.all([params, searchParams]);
   const actionFeedback = readArtifactActionFeedback(actionParams);
-  const humanAuthority = getHumanAuthorityConfiguration();
-  const { data: proposalRow } = await supabase.from("artifact_change_proposals")
-    .select("*").eq("id", id).maybeSingle();
+  const [humanAuthorityReadiness, proposalResult] = await Promise.all([
+    getHumanAuthorityReadiness(),
+    supabase.from("artifact_change_proposals").select("*").eq("id", id).maybeSingle(),
+  ]);
+  const humanAuthorityReady = humanAuthorityReadiness === "ready";
+  const { data: proposalRow } = proposalResult;
   if (!proposalRow) notFound();
   const proposal = proposalRow as ArtifactChangeProposal;
 
@@ -66,12 +69,10 @@ export default async function ArtifactProposalDetail({
 
       {actionFeedback && <ActionFeedbackBanner {...actionFeedback} clearHref={`/artifacts/review/${id}`} />}
 
-      {isOpen && !humanAuthority.configured && (
+      {isOpen && !humanAuthorityReady && (
         <section role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
           <p className="text-xs font-semibold uppercase tracking-wide">Human review unavailable</p>
-          <p className="text-sm mt-1">
-            This runtime is missing: <span className="font-mono text-xs">{humanAuthority.missing.join(", ")}</span>.
-          </p>
+          <p className="text-sm mt-1">{humanAuthorityReadinessMessage(humanAuthorityReadiness)}</p>
         </section>
       )}
 
@@ -117,7 +118,8 @@ export default async function ArtifactProposalDetail({
       {isOpen && (
         <section className="rounded-lg border border-gray-200 bg-white p-4 mb-8">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Human review action</h2>
-          <form action={reviewArtifactProposalAction} className="space-y-3">
+          <form action={reviewArtifactProposalAction}>
+            <fieldset disabled={!humanAuthorityReady} className="space-y-3">
             <input type="hidden" name="proposal_id" value={proposal.id} />
             <textarea
               name="reason"
@@ -126,24 +128,26 @@ export default async function ArtifactProposalDetail({
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
             />
             <div className="flex flex-wrap gap-2">
-              <button disabled={!humanAuthority.configured} name="action" value="approve" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
+              <button name="action" value="approve" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
                 Approve
               </button>
-              <button disabled={!humanAuthority.configured} name="action" value="request_revision" className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
+              <button name="action" value="request_revision" className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
                 Request revision
               </button>
-              <button disabled={!humanAuthority.configured} name="action" value="reject" className="min-h-10 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
+              <button name="action" value="reject" className="min-h-10 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
                 Reject
               </button>
-              <button disabled={!humanAuthority.configured} name="action" value="supersede" className="min-h-10 rounded-lg border border-gray-200 bg-gray-50 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400">
+              <button name="action" value="supersede" className="min-h-10 rounded-lg border border-gray-200 bg-gray-50 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400">
                 Supersede
               </button>
             </div>
+            </fieldset>
           </form>
 
           <details className="mt-5 border-t border-gray-100 pt-4">
             <summary className="cursor-pointer text-sm font-medium text-gray-700">Edit raw operations and approve</summary>
-            <form action={reviewArtifactProposalAction} className="space-y-3 mt-3">
+            <form action={reviewArtifactProposalAction}>
+              <fieldset disabled={!humanAuthorityReady} className="space-y-3 mt-3">
               <input type="hidden" name="proposal_id" value={proposal.id} />
               <input type="hidden" name="action" value="edit_and_approve" />
               <textarea
@@ -158,9 +162,10 @@ export default async function ArtifactProposalDetail({
                 placeholder="Describe the human edit"
                 className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
-              <button disabled={!humanAuthority.configured} className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
+              <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
                 Edit and approve
               </button>
+              </fieldset>
             </form>
           </details>
         </section>

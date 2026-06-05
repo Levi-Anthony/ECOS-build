@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "verify:human-door": "node scripts/verify-human-door-readiness.mjs",
     "security:audit": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {

@@ -35,7 +35,18 @@ ECB_KEY=...
 `SUPABASE_ANON_KEY` plus `HUMAN_AUTH_EMAIL` / `HUMAN_AUTH_PASSWORD` are
 server-only inputs to the distinct human-authority path. The authenticated user
 must also have an active row in `artifact_human_authorities`; reviewer identity
-is derived by the database from that authenticated principal.
+is derived by the database from that authenticated principal. Dashboard mutation
+controls and server actions fail closed unless the reviewer-session self-status
+RPC reports `ready`.
+
+Run the non-mutating reviewer readiness verifier with:
+
+```bash
+npm run verify:human-door
+```
+
+The Basic-Auth-protected `GET /api/health/human-door` endpoint performs the same
+fresh reviewer-session check and never exposes reviewer identity.
 
 `ECB_URL` and `ECB_KEY` are also server-only. Artifact human-door writes commit
 through transactional Supabase RPCs, then use ecb-mcp to regenerate embeddings

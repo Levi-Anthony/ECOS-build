@@ -36,8 +36,10 @@ describe("artifact action feedback", () => {
       .toContain("changed after the form was opened");
     expect(artifactActionErrorMessage(new Error("HUMAN_AUTHORITY_REQUIRED: no reviewer")))
       .toContain("authorization failed");
-    expect(artifactActionErrorMessage(new Error("Human authority path is not configured")))
+    expect(artifactActionErrorMessage(new Error("HUMAN_AUTHORITY_NOT_READY:missing_configuration")))
       .toContain("not configured in this runtime");
+    expect(artifactActionErrorMessage(new Error("HUMAN_AUTHORITY_NOT_READY:authority_inactive")))
+      .toContain("mapping is inactive");
   });
 
   it("does not expose unexpected database errors", () => {

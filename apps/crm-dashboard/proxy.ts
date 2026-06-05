@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hasBasicAuthPassword } from "@/lib/basic-auth";
 
 // Site-wide password gate (HTTP Basic Auth) for the ECOS dashboard.
 // The dashboard renders private CRM / BRAIN / artifact data server-side, so the
@@ -12,23 +13,30 @@ import { NextRequest, NextResponse } from "next/server";
 
 export function proxy(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;
+  const healthRequest = req.nextUrl.pathname === "/api/health/human-door";
+  const response = (body: string, status: number, headers: Record<string, string> = {}) => new NextResponse(body, {
+    status,
+    headers: healthRequest ? { ...headers, "Cache-Control": "no-store" } : headers,
+  });
+
   if (!password) {
-    return new NextResponse("Site password not configured.", { status: 503 });
+    if (healthRequest) {
+      return response(JSON.stringify({ status: "missing_configuration" }), 503, {
+        "Content-Type": "application/json",
+      });
+    }
+    return response("Site password not configured.", 503);
   }
 
   const header = req.headers.get("authorization");
-  if (header?.startsWith("Basic ")) {
-    // atob is available in the Edge runtime.
-    const decoded = atob(header.slice("Basic ".length));
-    const supplied = decoded.slice(decoded.indexOf(":") + 1);
-    if (supplied === password) {
-      return NextResponse.next();
-    }
+  if (hasBasicAuthPassword(header, password)) {
+    const next = NextResponse.next();
+    if (healthRequest) next.headers.set("Cache-Control", "no-store");
+    return next;
   }
 
-  return new NextResponse("Authentication required.", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="ECOS Dashboard"' },
+  return response("Authentication required.", 401, {
+    "WWW-Authenticate": 'Basic realm="ECOS Dashboard"',
   });
 }
 

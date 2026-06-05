@@ -6,7 +6,7 @@ import { Markdown } from "@/lib/markdown";
 import { CopyButton } from "@/lib/copy-button";
 import { editArtifactBlockAction, updateArtifactGovernanceAction } from "@/app/artifacts/actions";
 import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
-import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
+import { getHumanAuthorityReadiness, humanAuthorityReadinessMessage } from "@/lib/human-authority";
 import { formatArtifactTag, sortArtifactTags } from "@/lib/artifact-browser";
 import { notFound } from "next/navigation";
 
@@ -46,13 +46,16 @@ export default async function ArtifactDetailPage({
   const key = decodeURIComponent(encodedKey);
   const actionFeedback = readArtifactActionFeedback(actionParams);
   const canonicalHref = `/artifacts/${encodeURIComponent(key)}`;
-  const humanAuthority = getHumanAuthorityConfiguration();
-
-  const { data: artifactRow, error } = await supabase
-    .from("artifacts")
-    .select("id, key, title, kind, status, review_policy, current_version, metadata, created_at, updated_at")
-    .eq("key", key)
-    .maybeSingle();
+  const [humanAuthorityReadiness, artifactResult] = await Promise.all([
+    getHumanAuthorityReadiness(),
+    supabase
+      .from("artifacts")
+      .select("id, key, title, kind, status, review_policy, current_version, metadata, created_at, updated_at")
+      .eq("key", key)
+      .maybeSingle(),
+  ]);
+  const humanAuthorityReady = humanAuthorityReadiness === "ready";
+  const { data: artifactRow, error } = artifactResult;
 
   if (error || !artifactRow) notFound();
 
@@ -194,12 +197,10 @@ export default async function ArtifactDetailPage({
 
       {actionFeedback && <ActionFeedbackBanner {...actionFeedback} clearHref={canonicalHref} />}
 
-      {!humanAuthority.configured && (
+      {!humanAuthorityReady && (
         <section role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
           <p className="text-xs font-semibold uppercase tracking-wide">Human editing unavailable</p>
-          <p className="text-sm mt-1">
-            This runtime is missing: <span className="font-mono text-xs">{humanAuthority.missing.join(", ")}</span>.
-          </p>
+          <p className="text-sm mt-1">{humanAuthorityReadinessMessage(humanAuthorityReadiness)}</p>
         </section>
       )}
 
@@ -248,7 +249,8 @@ export default async function ArtifactDetailPage({
           Human governance controls
           <span className="text-xs font-normal text-gray-400">authority · lifecycle · review policy</span>
         </summary>
-        <form action={updateArtifactGovernanceAction} className="border-t border-gray-100 p-4 grid gap-4 sm:grid-cols-3">
+        <form action={updateArtifactGovernanceAction}>
+          <fieldset disabled={!humanAuthorityReady} className="border-t border-gray-100 p-4 grid gap-4 sm:grid-cols-3">
           <input type="hidden" name="key" value={artifact.key} />
           <input type="hidden" name="base_version" value={artifact.current_version} />
           <input type="hidden" name="current_status" value={artifact.status} />
@@ -281,13 +283,13 @@ export default async function ArtifactDetailPage({
           </label>
           <div className="sm:col-span-3">
             <button
-              disabled={!humanAuthority.configured}
               className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               Apply human governance change
             </button>
             <p className="text-xs text-gray-400 mt-2">Creates a new accepted version only when a field changes. Stale forms are rejected.</p>
           </div>
+          </fieldset>
         </form>
       </details>
 
@@ -392,7 +394,8 @@ export default async function ArtifactDetailPage({
                       <summary className="flex min-h-10 cursor-pointer list-none items-center px-4 py-3 text-xs font-medium text-gray-500 hover:text-gray-900">
                         Edit block as human
                       </summary>
-                      <form action={editArtifactBlockAction} className="border-t border-gray-100 p-4 space-y-3">
+                      <form action={editArtifactBlockAction}>
+                        <fieldset disabled={!humanAuthorityReady} className="border-t border-gray-100 p-4 space-y-3">
                         <input type="hidden" name="key" value={artifact.key} />
                         <input type="hidden" name="base_version" value={artifact.current_version} />
                         <input type="hidden" name="path" value={b.path} />
@@ -413,12 +416,12 @@ export default async function ArtifactDetailPage({
                         </label>
                         <button
                           type="submit"
-                          disabled={!humanAuthority.configured}
                           className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
                           Save new accepted version
                         </button>
                         <p className="text-xs text-gray-400">Unchanged content creates no revision. Stale versions or block hashes are rejected.</p>
+                        </fieldset>
                       </form>
                     </details>
                   )}

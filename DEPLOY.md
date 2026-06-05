@@ -236,6 +236,45 @@ Rollout acceptance:
 Dashboard server-only `SUPABASE_ANON_KEY`, `HUMAN_AUTH_EMAIL`, and `HUMAN_AUTH_PASSWORD` are
 configured in production. `SITE_PASSWORD` remains the separate coarse access gate.
 
+### Human Door repair and two-release health gate
+
+The production reviewer mapping is repaired manually, outside migration history, with
+`scripts/sql/repair-production-artifact-reviewer.sql`. Run the complete file in the production
+Supabase SQL editor. It uses one serializable fail-closed transaction, requires exactly one
+case-insensitive `artifact-reviewer@ecos.local` Auth user, and aborts if `principal_id = 'levi'`
+belongs to another user. Do not rotate reviewer credentials unless the readiness result is
+`authentication_failed`.
+
+Release A includes:
+
+- `get_current_artifact_human_authority_status()` and pgTAP permission/status tests.
+- Reviewer-session dashboard readiness checks and fail-closed mutation controls/actions.
+- Basic-Auth-protected `GET /api/health/human-door`, always with `Cache-Control: no-store`.
+- Non-mutating `npm run verify:human-door`.
+
+After deploying Release A:
+
+1. Run the non-mutating verifier with the production reviewer environment.
+2. Call the canonical health endpoint with the site Basic Auth password and confirm
+   `200 {"status":"ready"}`.
+3. Make one deliberate production block edit and refresh. Confirm the accepted version remains
+   current and its revision records `human|levi|direct_block_edit`.
+4. Record that Release A Vercel deployment ID as the known-good rollback baseline.
+
+Release B must not be merged until those checks pass and the Release A deployment ID has been
+recorded. It adds the `Production Human Door Gate` workflow and bounded rollback policy, configured
+with:
+
+- GitHub secrets: `VERCEL_TOKEN`, `DASHBOARD_SITE_PASSWORD`.
+- GitHub variables: `VERCEL_PROJECT_ID`, `VERCEL_ORG_ID`,
+  `KNOWN_GOOD_PRODUCTION_DEPLOYMENT_ID`.
+
+The Release B workflow must remain inert while `KNOWN_GOOD_PRODUCTION_DEPLOYMENT_ID` is unset. Once
+enabled, it waits for the Vercel auto-deployment correlated to `GITHUB_SHA`, verifies the canonical
+production alias, and applies the bounded rollback policy. Authority-wide failures and ambiguous
+dependency/alias states alert without rollback. Reviewer credentials and Supabase keys must never
+be copied into GitHub.
+
 ---
 
 ## ecb-mcp — Effortless Connection Brain (the consolidated MCP server)

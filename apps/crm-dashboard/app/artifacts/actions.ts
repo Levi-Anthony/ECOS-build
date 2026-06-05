@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase-server";
 import { reindexArtifactPaths } from "@/lib/ecb-mcp";
-import { getHumanAuthorityClient } from "@/lib/human-authority";
+import {
+  getHumanAuthorityClient,
+  getHumanAuthorityReadiness,
+  type HumanAuthorityReadiness,
+} from "@/lib/human-authority";
 import {
   artifactBlockContentHash,
   artifactHumanEditSummary,
@@ -30,6 +34,11 @@ const parseVersion = (formData: FormData): number => {
   return version;
 };
 
+const requireReadyHumanAuthority = async (): Promise<void> => {
+  const status: HumanAuthorityReadiness = await getHumanAuthorityReadiness({ forceRefresh: true });
+  if (status !== "ready") throw new Error(`HUMAN_AUTHORITY_NOT_READY:${status}`);
+};
+
 const finishArtifactWrite = async (key: string, changedPaths: string[]): Promise<string[]> => {
   const warnings = await reindexArtifactPaths(key, changedPaths);
   try {
@@ -46,6 +55,7 @@ export async function editArtifactBlockAction(formData: FormData) {
   const key = required(formData, "key");
   let feedback: ArtifactActionFeedback;
   try {
+    await requireReadyHumanAuthority();
     const path = required(formData, "path");
     const expectedHash = required(formData, "expected_hash");
     const rawContent = formData.get("content");
@@ -85,6 +95,7 @@ export async function updateArtifactGovernanceAction(formData: FormData) {
   const key = required(formData, "key");
   let feedback: ArtifactActionFeedback;
   try {
+    await requireReadyHumanAuthority();
     const baseVersion = parseVersion(formData);
     const reason = required(formData, "reason");
     const currentStatus = required(formData, "current_status");
@@ -129,6 +140,7 @@ export async function reviewArtifactProposalAction(formData: FormData) {
   const proposalId = required(formData, "proposal_id");
   let feedback: ArtifactActionFeedback;
   try {
+    await requireReadyHumanAuthority();
     const action = required(formData, "action");
     const reason = String(formData.get("reason") ?? "").trim() || null;
     let replacementOps: ArtifactPatchOp[] | null = null;
