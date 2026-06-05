@@ -4,6 +4,7 @@ import { relativeAge } from "@/lib/logic";
 import { ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
 import { Markdown } from "@/lib/markdown";
 import { CopyButton } from "@/lib/copy-button";
+import { editArtifactBlockAction, updateArtifactGovernanceAction } from "@/app/artifacts/actions";
 import { notFound } from "next/navigation";
 
 // jsonb metadata is loosely typed — read fields with guards.
@@ -36,7 +37,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
 
   const { data: artifactRow, error } = await supabase
     .from("artifacts")
-    .select("id, key, title, kind, status, current_version, metadata, created_at, updated_at")
+    .select("id, key, title, kind, status, review_policy, current_version, metadata, created_at, updated_at")
     .eq("key", key)
     .maybeSingle();
 
@@ -54,7 +55,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
 
   const { data: revisionRows } = await supabase
     .from("artifact_revisions")
-    .select("id, artifact_id, version, base_version, ops, summary, actor, created_at")
+    .select("id, artifact_id, version, base_version, ops, summary, actor, actor_type, actor_id, source_refs, created_at")
     .eq("artifact_id", artifact.id)
     .order("version", { ascending: false })
     .limit(50);
@@ -66,9 +67,18 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
     .order("created_at", { ascending: false })
     .limit(30);
 
+  const { data: proposalRows } = await supabase
+    .from("artifact_change_proposals")
+    .select("id, status, summary, created_at")
+    .eq("artifact_id", artifact.id)
+    .in("status", ["pending", "revision_requested", "conflicted"])
+    .order("created_at", { ascending: false })
+    .limit(20);
+
   const blocks = (blockRows ?? []) as ArtifactBlock[];
   const revisions = (revisionRows ?? []) as ArtifactRevision[];
   const links = (linkRows ?? []) as ArtifactLink[];
+  const openProposals = (proposalRows ?? []) as Array<{ id: string; status: string; summary: string; created_at: string }>;
 
   const authorityLevel = str(meta, "authority_level");
   const scope = str(meta, "scope");
@@ -81,6 +91,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
   const reviewChips = ([
     artifact.kind ? { label: `kind: ${artifact.kind}`, tone: "purple" } : null,
     artifact.status ? { label: `status: ${artifact.status}`, tone: artifact.status === "active" ? "emerald" : "gray" } : null,
+    artifact.review_policy ? { label: `review: ${artifact.review_policy}`, tone: artifact.review_policy === "human_gate" ? "indigo" : "gray" } : null,
     { label: `v${artifact.current_version}` },
     authorityLevel ? { label: `authority: ${authorityLevel}`, tone: "indigo" } : null,
     scope ? { label: `scope: ${scope}`, tone: "blue" } : null,
@@ -93,6 +104,7 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
     !summary ? { label: "missing summary", tone: "amber", title: "No metadata.summary is stored on this artifact." } : null,
     blocks.length === 0 ? { label: "no blocks", tone: "red", title: "No current artifact_blocks rows found." } : null,
     revisions.length === 0 ? { label: "no revisions", tone: "amber", title: "No artifact_revisions rows found." } : null,
+    openProposals.length > 0 ? { label: `${openProposals.length} open proposal${openProposals.length === 1 ? "" : "s"}`, tone: "amber", title: "Artifact has pending, revision-requested, or conflicted proposals." } : null,
   ] as Array<ReviewChip | null>).filter((x): x is ReviewChip => x !== null);
 
   const reviewFields: ReviewField[] = [
@@ -145,6 +157,72 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
           ))}
         </div>
       </div>
+
+      {openProposals.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-amber-900">Open review proposals</h2>
+              <p className="text-sm text-amber-800 mt-1">Proposed changes have not altered the current artifact.</p>
+            </div>
+            <a href="/artifacts/review" className="inline-flex min-h-10 items-center text-sm font-medium text-amber-900 hover:text-amber-700">
+              Open review inbox
+            </a>
+          </div>
+          <div className="mt-3 space-y-2">
+            {openProposals.map((proposal) => (
+              <a key={proposal.id} href={`/artifacts/review/${proposal.id}`} className="block rounded border border-amber-200 bg-white px-3 py-2 text-sm text-gray-800 hover:border-amber-400">
+                <span className="font-medium">{proposal.summary}</span>
+                <span className="ml-2 text-xs text-gray-500">{proposal.status.replaceAll("_", " ")}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <details className="bg-white rounded-lg border border-gray-200 mb-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-gray-900">
+          Human governance controls
+          <span className="text-xs font-normal text-gray-400">authority · lifecycle · review policy</span>
+        </summary>
+        <form action={updateArtifactGovernanceAction} className="border-t border-gray-100 p-4 grid gap-4 sm:grid-cols-3">
+          <input type="hidden" name="key" value={artifact.key} />
+          <input type="hidden" name="base_version" value={artifact.current_version} />
+          <input type="hidden" name="current_status" value={artifact.status} />
+          <input type="hidden" name="current_review_policy" value={artifact.review_policy} />
+          <input type="hidden" name="current_authority" value={authorityLevel ?? "evidence"} />
+          <label className="text-sm text-gray-700">
+            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Authority</span>
+            <select name="authority_level" defaultValue={authorityLevel ?? "evidence"} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
+              {["evidence", "draft", "proposed_instruction", "approved_instruction", "policy"].map((value) => (
+                <option key={value} value={value}>{value.replaceAll("_", " ")}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-gray-700">
+            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Lifecycle</span>
+            <select name="status" defaultValue={artifact.status} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
+              {["active", "draft", "archived", "superseded"].map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="text-sm text-gray-700">
+            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Review policy</span>
+            <select name="review_policy" defaultValue={artifact.review_policy} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
+              <option value="live_audit">live audit</option>
+              <option value="human_gate">human gate</option>
+            </select>
+          </label>
+          <label className="sm:col-span-3 text-sm text-gray-700">
+            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Change reason</span>
+            <input name="reason" required className="min-h-10 w-full rounded-lg border border-gray-200 px-3" placeholder="Why this authority or lifecycle change is appropriate" />
+          </label>
+          <div className="sm:col-span-3">
+            <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+              Apply human governance change
+            </button>
+          </div>
+        </form>
+      </details>
 
       <details className="lg:hidden bg-white rounded-lg border border-gray-200 mb-6">
         <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-900">
@@ -242,6 +320,34 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                   <div className="p-4">
                     <Markdown>{b.content}</Markdown>
                   </div>
+                  {!archived && (
+                    <details className="border-t border-gray-100">
+                      <summary className="flex min-h-10 cursor-pointer list-none items-center px-4 py-3 text-xs font-medium text-gray-500 hover:text-gray-900">
+                        Edit block as human
+                      </summary>
+                      <form action={editArtifactBlockAction} className="border-t border-gray-100 p-4 space-y-3">
+                        <input type="hidden" name="key" value={artifact.key} />
+                        <input type="hidden" name="base_version" value={artifact.current_version} />
+                        <input type="hidden" name="path" value={b.path} />
+                        <input type="hidden" name="expected_hash" value={b.content_hash ?? ""} />
+                        <textarea
+                          name="content"
+                          rows={14}
+                          defaultValue={b.content}
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                        />
+                        <input
+                          name="reason"
+                          required
+                          placeholder="Describe the human edit"
+                          className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                        />
+                        <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+                          Save new accepted version
+                        </button>
+                      </form>
+                    </details>
+                  )}
                 </section>
               );
             })}

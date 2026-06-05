@@ -6,6 +6,7 @@ Fully resumable — restart anytime, picks up from oldest unprocessed entry.
 
 Usage:
     export OPENROUTER_API_KEY=sk-or-...
+    export BRAIN_KEY=<brain access key>
     python3 backfill.py
 
 Optional env vars:
@@ -21,7 +22,7 @@ import requests
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MIDDLEWARE_URL = "https://lqbrzoicorehwidkdhoi.supabase.co/functions/v1/brain-middleware"
-BRAIN_KEY      = "d54c89fa2a1db9cac307909b7f59ec46a9c5cf7c79dba763ae992278f2c7abf8"
+BRAIN_KEY = os.environ.get("BRAIN_KEY") or os.environ.get("ECB_KEY", "")
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = os.environ.get("MODEL", "anthropic/claude-haiku-4.5")
@@ -161,6 +162,10 @@ def main():
     if not OPENROUTER_API_KEY:
         print("ERROR: OPENROUTER_API_KEY environment variable is not set.")
         print("  export OPENROUTER_API_KEY=sk-or-...")
+        return
+    if not BRAIN_KEY:
+        print("ERROR: BRAIN_KEY environment variable is not set.")
+        print("  export BRAIN_KEY=<brain access key>")
         return
 
     brain_headers = {

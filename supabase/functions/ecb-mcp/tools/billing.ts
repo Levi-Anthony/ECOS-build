@@ -113,11 +113,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       if (!data?.length) return { content: [{ type: "text" as const, text: "No unbilled work found." }] };
 
-      type LogRow = { id: string; contact_id: string; service_date: string; service_type: string; description: string; time_spent_minutes: number | null; professional_contacts: { name: string; company: string | null } | null };
+      type LogRow = { id: string; contact_id: string; service_date: string; service_type: string; description: string; time_spent_minutes: number | null; professional_contacts: { name: string; company: string | null }[] };
       const byContact: Record<string, { name: string; logs: LogRow[]; totalMin: number }> = {};
       for (const l of data as LogRow[]) {
         const cid = l.contact_id;
-        if (!byContact[cid]) byContact[cid] = { name: l.professional_contacts?.name ?? cid, logs: [], totalMin: 0 };
+        if (!byContact[cid]) byContact[cid] = { name: l.professional_contacts[0]?.name ?? cid, logs: [], totalMin: 0 };
         byContact[cid].logs.push(l);
         byContact[cid].totalMin += l.time_spent_minutes ?? 0;
       }

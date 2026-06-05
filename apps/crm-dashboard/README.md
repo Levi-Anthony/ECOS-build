@@ -21,10 +21,26 @@ Required local environment:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_ANON_KEY=...
+SITE_PASSWORD=...
+HUMAN_AUTH_EMAIL=...
+HUMAN_AUTH_PASSWORD=...
+ECB_URL=https://<project>.supabase.co/functions/v1/ecb-mcp
+ECB_KEY=...
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is server-only. Do not store a service-role key in any
 `NEXT_PUBLIC_` variable.
+
+`SUPABASE_ANON_KEY` plus `HUMAN_AUTH_EMAIL` / `HUMAN_AUTH_PASSWORD` are
+server-only inputs to the distinct human-authority path. The authenticated user
+must also have an active row in `artifact_human_authorities`; reviewer identity
+is derived by the database from that authenticated principal.
+
+`ECB_URL` and `ECB_KEY` are also server-only. Artifact human-door writes commit
+through transactional Supabase RPCs, then use ecb-mcp to regenerate embeddings
+for changed blocks. If these are absent, accepted content remains durable and
+stale vectors are removed, but embedding regeneration stays pending.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

@@ -85,14 +85,14 @@ const formatAuthority = (authorityLevel: string): string =>
 export default async function ArtifactsPage({
   searchParams,
 }: {
-  searchParams: { kind?: string; status?: string; authority?: string; q?: string; sort?: string };
+  searchParams: { kind?: string; status?: string; authority?: string; review?: string; q?: string; sort?: string };
 }) {
-  const { kind, status, authority, q, sort } = searchParams ?? {};
+  const { kind, status, authority, review, q, sort } = searchParams ?? {};
   const search = q?.trim();
 
   const { data: artifacts, error } = await supabase
     .from("artifacts")
-    .select("id, key, title, kind, status, current_version, metadata, updated_at")
+    .select("id, key, title, kind, status, review_policy, current_version, metadata, updated_at")
     .order("updated_at", { ascending: false })
     .limit(500);
 
@@ -105,6 +105,7 @@ export default async function ArtifactsPage({
       const authorityLevel = str(meta, "authority_level");
       if (kind && artifact.kind !== kind) return false;
       if (status && artifact.status !== status) return false;
+      if (review && artifact.review_policy !== review) return false;
       if (authority && authorityLevel !== authority) return false;
       if (!normalizedSearch) return true;
       return [artifact.title, artifact.key, summary].some((value) => value.toLowerCase().includes(normalizedSearch));
@@ -122,17 +123,19 @@ export default async function ArtifactsPage({
   const kinds = countBy(allRows, (artifact) => artifact.kind).map(([value]) => value);
   const statuses = countBy(allRows, (artifact) => artifact.status).map(([value]) => value);
   const authorities = countBy(allRows, (artifact) => str(artifact.metadata, "authority_level")).map(([value]) => value);
+  const reviewPolicies = countBy(allRows, (artifact) => artifact.review_policy).map(([value]) => value);
   const resultKindCounts = countBy(rows, (artifact) => artifact.kind);
   const resultStatusCounts = countBy(rows, (artifact) => artifact.status);
   const resultAuthorityCounts = countBy(rows, (artifact) => str(artifact.metadata, "authority_level"));
+  const resultReviewCounts = countBy(rows, (artifact) => artifact.review_policy);
   const activeCount = rows.filter((artifact) => artifact.status === "active").length;
   const instructionGradeCount = rows.filter((artifact) =>
     ["policy", "approved_instruction"].includes(str(artifact.metadata, "authority_level") ?? "")
   ).length;
 
-  const buildUrl = (overrides: { kind?: string; status?: string; authority?: string; q?: string; sort?: string }) => {
+  const buildUrl = (overrides: { kind?: string; status?: string; authority?: string; review?: string; q?: string; sort?: string }) => {
     const params = new URLSearchParams();
-    const merged = { kind, status, authority, q: search, sort, ...overrides };
+    const merged = { kind, status, authority, review, q: search, sort, ...overrides };
     for (const [k, v] of Object.entries(merged)) {
       if (v) params.set(k, v);
     }
@@ -144,6 +147,7 @@ export default async function ArtifactsPage({
     kind ? { label: `kind: ${kind}`, tone: "purple" } : null,
     status ? { label: `status: ${status}`, tone: status === "active" ? "emerald" : "gray" } : null,
     authority ? { label: `authority: ${formatAuthority(authority)}`, tone: "indigo" } : null,
+    review ? { label: `review: ${review}`, tone: "emerald" } : null,
     search ? { label: `search: ${search}`, tone: "blue" } : null,
     sort === "title" ? { label: "sort: title", tone: "gray" } : null,
     sort === "authority" ? { label: "sort: authority", tone: "gray" } : null,
@@ -199,7 +203,12 @@ export default async function ArtifactsPage({
         <h1 className="text-xl font-semibold">
           <span className="text-violet-600">▤</span> Artifacts
         </h1>
-        <span className="text-sm text-gray-500">{rows.length} shown · {allRows.length} total</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <a href="/artifacts/review" className="inline-flex min-h-10 items-center rounded-lg bg-emerald-800 px-3 text-sm font-medium text-white hover:bg-emerald-700">
+            Review inbox
+          </a>
+          <span className="text-sm text-gray-500">{rows.length} shown · {allRows.length} total</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -221,9 +230,10 @@ export default async function ArtifactsPage({
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-5 grid gap-4 lg:grid-cols-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-5 grid gap-4 lg:grid-cols-4">
         <CountChips label="Kinds" counts={resultKindCounts} colorFor={(value) => KIND_COLORS[value]} />
         <CountChips label="Lifecycle status" counts={resultStatusCounts} colorFor={(value) => STATUS_COLORS[value]} />
+        <CountChips label="Review policy" counts={resultReviewCounts} colorFor={(value) => value === "human_gate" ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-700"} />
         <CountChips
           label="Authority level"
           counts={resultAuthorityCounts}
@@ -236,6 +246,7 @@ export default async function ArtifactsPage({
         {kind && <input type="hidden" name="kind" value={kind} />}
         {status && <input type="hidden" name="status" value={status} />}
         {authority && <input type="hidden" name="authority" value={authority} />}
+        {review && <input type="hidden" name="review" value={review} />}
         {sort && <input type="hidden" name="sort" value={sort} />}
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -278,6 +289,12 @@ export default async function ArtifactsPage({
             <FilterPill key={level} label={formatAuthority(level)} href={buildUrl({ authority: level })} active={authority === level} />
           ))}
         </FilterGroup>
+        <FilterGroup label="Review policy">
+          <FilterPill label="All review policies" href={buildUrl({ review: undefined })} active={!review} />
+          {reviewPolicies.map((policy) => (
+            <FilterPill key={policy} label={policy.replaceAll("_", " ")} href={buildUrl({ review: policy })} active={review === policy} />
+          ))}
+        </FilterGroup>
       </div>
 
       <ActiveFilterSummary filters={activeFilters} clearHref="/artifacts" resultCount={rows.length} />
@@ -313,6 +330,9 @@ export default async function ArtifactsPage({
                         {a.status}
                       </span>
                     )}
+                    <span className={a.review_policy === "human_gate" ? chipClass("emerald") : chipClass("gray")}>
+                      {a.review_policy}
+                    </span>
                     <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                       v{a.current_version}
                     </span>

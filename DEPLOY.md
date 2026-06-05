@@ -91,6 +91,9 @@ what you see so I can unblock you.
 ## Edge Function Environment Variables
 
 Set in Supabase Dashboard → Project Settings → Edge Functions → Secrets, or via `supabase secrets set`.
+Secrets handling and rotation procedure live in `docs/security/secrets-operating-model.md` and
+`docs/security/ecos-secrets-inventory.md`. Those docs name consumers and storage locations only;
+never add secret values to repo docs.
 
 | Variable | Description |
 |---|---|
@@ -115,7 +118,7 @@ Note: `--no-verify-jwt` is set on `ecb-mcp` and `brain-middleware`. Auth is hand
 
 The git↔deploy fork is collapsed: `main` now carries the exact code that runs in prod (modular
 `tools/thoughts.ts` layout, the boot/handoff/pulse tools, `lib/`, and Atom Addressability —
-`EXPECTED_TOOL_COUNT = 50`). The earlier `tools/brain.ts` consolidation (`a0db8c6`) had dropped the
+`EXPECTED_TOOL_COUNT = 58`). The earlier `tools/brain.ts` consolidation (`a0db8c6`) had dropped the
 7 boot/handoff/pulse tools and was never deployed; it is retired. Its history is preserved on
 `backup/pre-reconcile` if the cosmetic `thoughts.ts`→`brain.ts` rename is ever wanted — as a
 standalone, fully-tooled change, never bundled with dropping tools.
@@ -136,8 +139,8 @@ ECB_KEY=…             python3 scripts/ecb-drift-check.py            # live too
 SUPABASE_ACCESS_TOKEN=… python3 scripts/ecb-migration-drift.py      # applied schema vs committed migrations
 ```
 
-Live as of 2026-06-02: **v14, 50 tools**. The "31 tools" figures lower in this file are stale
-(pre-consolidation) and describe an old tool set.
+Live as of 2026-06-05: Artifact v3 hardening and **58 tools** are deployed to staging and
+production.
 
 ---
 
@@ -211,19 +214,41 @@ and requires an explicit `mode`.
 
 ---
 
+## Artifact v3 Human Door — LIVE
+
+Migration `20260605010000_artifact_v3_human_door.sql`, the 58-tool `ecb-mcp`, and the dashboard
+human-authority path were deployed to staging and production on 2026-06-05 after explicit approval.
+Production also received the previously unapplied Phase A migration
+`20260604100000_artifact_v2_retire_v1_phase_a.sql` after its data, dependency, and snapshot-FK
+preflights passed.
+
+Rollout acceptance:
+
+1. Local migration reset and all 16 pgTAP tests pass.
+2. Dashboard lint, typecheck, 84 tests, and production build pass. `npm audit` reports two moderate
+   transitive PostCSS advisories whose available fix is a breaking Next.js change.
+3. Staging acceptance: 15 passed, 0 failed, 1 expected skip on the fresh staging dataset.
+4. Staging and production direct service-role calls to review a proposal or invoke the human apply
+   RPC return HTTP 403.
+5. Authenticated allowlisted reviewers can approve, and the database records
+   `reviewed_by_type = human` with the mapped stable principal ID.
+
+Dashboard server-only `SUPABASE_ANON_KEY`, `HUMAN_AUTH_EMAIL`, and `HUMAN_AUTH_PASSWORD` are
+configured in production. `SITE_PASSWORD` remains the separate coarse access gate.
+
+---
+
 ## ecb-mcp — Effortless Connection Brain (the consolidated MCP server)
 
-`ecb-mcp` is the single MCP server for ECOS::BRAIN. It hosts all 31 tools across BRAIN (semantic memory) and ECOS (action on memory) domains. Per OB1 canon, this is one logical Open Brain instance per user; the prior split into `open-brain-mcp` + `ecos-crm-mcp` (renamed `ecos-mcp`) was an unintentional drift consolidated back together on 2026-05-04. See `~/ecos/docs/architecture/mcp-boundary-decision.md` for the rationale.
+`ecb-mcp` is the single MCP server for ECOS::BRAIN. Current source hosts 58 tools across BRAIN
+(semantic memory) and ECOS (action on memory) domains. Per OB1 canon, this is one logical Open Brain
+instance per user; the prior split into `open-brain-mcp` + `ecos-crm-mcp` (renamed `ecos-mcp`) was an
+unintentional drift consolidated back together on 2026-05-04. See
+`~/ecos/docs/architecture/mcp-boundary-decision.md` for the rationale.
 
-**Tools (31 total)**, organized into per-domain modules:
-- **BRAIN** (6): `search_thoughts`, `list_thoughts`, `thought_stats`, `capture_thought`, `update_thought`, `delete_thought`
-- **Contacts** (8): `add_contact`, `search_contacts`, `log_interaction`, `get_contact_history`, `get_follow_ups_due`, `update_contact`, `get_contacts_by_domain`, `set_administrative_status`
-- **Opportunities** (1): `create_opportunity`
-- **Billing** (5): `log_service_call`, `get_client_service_history`, `get_unbilled_work`, `create_billing_entry`, `update_billing_status`
-- **Observations** (4): `add_person_observation`, `get_person_observations`, `compile_person_snapshot`, `get_person_card`
-- **Brain-bridge** (3): `link_thought_to_contact`, `get_linked_thoughts`, `search_brain_for_contact`
-- **Briefing** (1): `get_briefing_context`
-- **Taste** (3): `capture_taste_preference`, `update_taste_preference`, `list_taste_preferences`
+**Tools (58 total in current source)**: thoughts 8, pulse 2, handoff 4, boot 1, contacts 8,
+opportunities 1, billing 5, observations 4, brain-bridge 3, briefing 1, taste 3, artifacts 15,
+entities 3.
 
 Tool prefix is `mcp__ecb__*`.
 

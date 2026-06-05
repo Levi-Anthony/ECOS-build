@@ -1,6 +1,5 @@
 import { supabase } from "@/lib/supabase-server";
 import { DOMAIN_COLORS, DOMAIN_LABELS, STAGE_COLORS, BRAIN_DOMAIN_COLORS, BRAIN_DOMAIN_LABELS } from "@/lib/supabase";
-import type { Briefing } from "@/lib/supabase";
 import { relativeAge, weekLabel, aggregateUnbilled } from "@/lib/logic";
 
 const BRAIN_DOMAINS = [
@@ -87,7 +86,7 @@ export default async function WeeklyPage() {
   const unbilledByContact = aggregateUnbilled(unbilledLogs ?? []);
   const totalUnbilledMin = (unbilledLogs ?? []).reduce((s, l) => s + (l.time_spent_minutes ?? 0), 0);
   const unbilledContactIds = Object.keys(unbilledByContact);
-  let unbilledContactNames: Record<string, string> = {};
+  const unbilledContactNames: Record<string, string> = {};
   if (unbilledContactIds.length > 0) {
     const { data: nameRows } = await supabase
       .from("professional_contacts")

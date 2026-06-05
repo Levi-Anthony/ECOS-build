@@ -1,17 +1,14 @@
 // ecb-mcp — Effortless Connection Brain (the consolidated MCP server for ECOS::BRAIN).
 //
 // One MCP server, one URL (/functions/v1/ecb-mcp), one tool prefix (mcp__ecb__*),
-// 41 tools across 10 per-domain modules + 3 ECBRAIN stub modules (Phase 2 refactor).
+// 58 tools across 13 per-domain modules.
 // Per OB1 canon: one logical Open Brain instance per user.
 // See ~/ecos/docs/architecture/mcp-boundary-decision.md for rationale and migration history.
 //
 // Module structure: each tool module exports `register(registrar, supabase, helpers)`
 // and registers its tools via the tracked registrar (which throws synchronously
 // on duplicate name). After all modules register, the count assertion below
-// verifies exactly 41 tools live.
-//
-// ECBRAIN stub modules (pulse, handoff, boot) register 0 tools in Phase 2.
-// They will grow in Phases 3–4. Count assertion remains 41 until then.
+// verifies exactly 58 tools live in this source revision.
 //
 // Middleware order is load-bearing: CORS first (so OPTIONS preflight succeeds
 // without auth), then auth (x-brain-key header OR ?key= query param), then the
@@ -44,7 +41,7 @@ import { register as registerTaste } from "./tools/taste.ts";
 import { register as registerArtifacts } from "./tools/artifacts.ts";
 import { register as registerEntities } from "./tools/entities.ts";
 
-const EXPECTED_TOOL_COUNT = 55; // Artifact v2: artifacts module 7 → 12 tools (patch-based engine; retired approve_artifact + update_artifact, added manifest/block/patch/checkpoint/snapshot/replace_body/reindex)
+const EXPECTED_TOOL_COUNT = 58; // Artifact v3 adds proposal submit/list/detail; review is human-door-only.
 
 const supabase = createServiceClient();
 

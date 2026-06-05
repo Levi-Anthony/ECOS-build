@@ -77,6 +77,7 @@ export type Artifact = {
   title: string;
   kind: string;
   status: string;
+  review_policy: "live_audit" | "human_gate";
   current_version: number;
   metadata?: Record<string, unknown> | null;
   created_at: string;
@@ -105,8 +106,60 @@ export type ArtifactRevision = {
   ops?: unknown;
   summary: string | null;
   actor: string | null;
+  actor_type?: "human" | "agent" | "system" | "import";
+  actor_id?: string | null;
+  source_refs?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;
+};
+
+export type ArtifactChangeProposal = {
+  id: string;
+  artifact_id: string;
+  base_version: number;
+  ops: ArtifactPatchOp[];
+  summary: string;
+  proposer_actor_type: "human" | "agent" | "system" | "import";
+  proposer_actor_id: string | null;
+  source_refs: Record<string, unknown>;
+  review_policy_at_proposal: "live_audit" | "human_gate";
+  status: "pending" | "revision_requested" | "approved" | "rejected" | "conflicted" | "superseded";
+  supersedes_proposal_id: string | null;
+  review_reason: string | null;
+  reviewed_by_type: "human" | "agent" | "system" | "import" | null;
+  reviewed_by_id: string | null;
+  reviewed_at: string | null;
+  applied_version: number | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactReviewEvent = {
+  id: string;
+  artifact_id: string;
+  proposal_id: string | null;
+  event_type: "proposed" | "approved" | "edited_and_approved" | "rejected" | "revision_requested" | "conflicted" | "superseded";
+  actor_type: "human" | "agent" | "system" | "import";
+  actor_id: string | null;
+  reason: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ArtifactPatchOp = {
+  op: string;
+  path?: string;
+  from_path?: string;
+  to_path?: string;
+  content?: string;
+  title?: string;
+  expected_hash?: string;
+  status?: string;
+  review_policy?: "live_audit" | "human_gate";
+  metadata?: Record<string, unknown>;
+  metadata_patch?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type ArtifactLink = {

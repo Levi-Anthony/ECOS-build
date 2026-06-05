@@ -14,16 +14,60 @@
 
 import { describe, it, expect } from "vitest";
 import type {
-  Contact,
-  Interaction,
   Opportunity,
-  Thought,
   ServiceLog,
   BillingEntry,
   Briefing,
   PersonObservation,
   PersonSnapshot,
+  Artifact,
+  ArtifactChangeProposal,
 } from "@/lib/supabase";
+
+// ─── Artifact v3 human door ─────────────────────────────────────────────────
+
+describe("Artifact v3 governance types", () => {
+  it("exposes review_policy on artifacts", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      key: "example",
+      title: "Example",
+      kind: "document",
+      status: "active",
+      review_policy: "human_gate",
+      current_version: 2,
+      metadata: {},
+      created_at: "2026-06-04",
+      updated_at: "2026-06-04",
+    };
+    expect(artifact.review_policy).toBe("human_gate");
+  });
+
+  it("types pending artifact change proposals", () => {
+    const proposal: ArtifactChangeProposal = {
+      id: "p1",
+      artifact_id: "a1",
+      base_version: 2,
+      ops: [{ op: "replace_block", path: "/body", expected_hash: "hash", content: "new" }],
+      summary: "Change body",
+      proposer_actor_type: "agent",
+      proposer_actor_id: "mcp",
+      source_refs: {},
+      review_policy_at_proposal: "human_gate",
+      status: "pending",
+      supersedes_proposal_id: null,
+      review_reason: null,
+      reviewed_by_type: null,
+      reviewed_by_id: null,
+      reviewed_at: null,
+      applied_version: null,
+      metadata: {},
+      created_at: "2026-06-04",
+      updated_at: "2026-06-04",
+    };
+    expect(proposal.ops[0].expected_hash).toBe("hash");
+  });
+});
 
 // ─── Opportunity ──────────────────────────────────────────────────────────────
 

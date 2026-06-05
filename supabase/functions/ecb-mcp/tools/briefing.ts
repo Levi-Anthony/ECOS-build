@@ -72,12 +72,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       lines.push("");
 
       // Most recent interaction per domain
-      type InteractionRow = { contact_id: string; interaction_type: string; summary: string | null; occurred_at: string; professional_contacts: { relationship_domain: string; name: string } | null };
+      type InteractionRow = { contact_id: string; interaction_type: string; summary: string | null; occurred_at: string; professional_contacts: { relationship_domain: string; name: string }[] };
       const interactions = (interactionsRes.data ?? []) as InteractionRow[];
       const seenDomains = new Set<string>();
       const recentByDomain: InteractionRow[] = [];
       for (const i of interactions) {
-        const domain = i.professional_contacts?.relationship_domain;
+        const domain = i.professional_contacts[0]?.relationship_domain;
         if (domain && !seenDomains.has(domain)) {
           seenDomains.add(domain);
           recentByDomain.push(i);
@@ -89,7 +89,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       } else {
         for (const i of recentByDomain) {
           const d = new Date(i.occurred_at).toLocaleDateString();
-          lines.push(`${i.professional_contacts?.relationship_domain}: ${i.professional_contacts?.name} — ${i.interaction_type} [${d}]${i.summary ? ` "${i.summary}"` : ""}`);
+          lines.push(`${i.professional_contacts[0]?.relationship_domain}: ${i.professional_contacts[0]?.name} — ${i.interaction_type} [${d}]${i.summary ? ` "${i.summary}"` : ""}`);
         }
       }
 

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 // correct password passes. Fail CLOSED: if SITE_PASSWORD is unset, deny (503)
 // rather than risk serving data unprotected.
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;
   if (!password) {
     return new NextResponse("Site password not configured.", { status: 503 });

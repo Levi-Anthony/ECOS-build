@@ -50,6 +50,8 @@ interface ArtifactRow {
   key: string;
   title: string;
   kind: string;
+  status: string;
+  review_policy: string;
   current_version: number;
   metadata: Record<string, unknown>;
   updated_at: string;
@@ -193,8 +195,9 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       try {
         const { data, error } = await supabase
           .from("artifacts")
-          .select("id, key, title, kind, current_version, metadata, updated_at")
+          .select("id, key, title, kind, status, review_policy, current_version, metadata, updated_at")
           .contains("metadata", { tags: ["boot"] }) // metadata @> '{"tags":["boot"]}'
+          .eq("status", "active")
           .order("updated_at", { ascending: false });
 
         if (error) {
@@ -204,6 +207,7 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
             const m = (a.metadata ?? {}) as Record<string, unknown>;
             return {
               id: a.id, key: a.key, title: a.title, kind: a.kind, version: a.current_version,
+              status: a.status, review_policy: a.review_policy,
               authority_level: m.authority_level ?? null,
               scope: m.scope ?? null,
               target_runtime: m.target_runtime ?? null,

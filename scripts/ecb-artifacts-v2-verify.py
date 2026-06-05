@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Artifact v2 acceptance/verification harness — drives the deployed ecb-mcp over
-MCP-over-HTTP and runs the 10 acceptance tests from the Artifact v2 spec.
+"""Artifact v2/v3 acceptance harness — drives the deployed ecb-mcp over
+MCP-over-HTTP and runs the patch-engine plus human-door acceptance tests.
 
 This MUTATES data (it creates one uniquely-keyed test artifact, e.g.
 `v2_verify_<epoch>`), so point it at STAGING, not prod, until v2 is approved.
@@ -74,6 +74,7 @@ def main():
         if not init or "result" not in init:
             print("ERROR: endpoint did not initialize (boot assertion may have thrown)", file=sys.stderr); sys.exit(1)
         rpc("notifications/initialized", notify=True)
+        tool_names = {tool["name"] for tool in rpc("tools/list")["result"]["tools"]}
     except urllib.error.HTTPError as e:
         print(f"ERROR: HTTP {e.code}: {e.read().decode()[:200]}", file=sys.stderr); sys.exit(1)
 
@@ -126,8 +127,11 @@ def main():
     check("6 hash mismatch rejected", err and "hash" in text.lower(), text[:200])
 
     # 7. append log preserves + appends, bumps version
+    text, err = call("get_artifact_block", {"key": key, "paths": ["/decision_log"]})
+    decision_hash = json.loads(text)["blocks"][0]["content_hash"] if not err else None
     text, err = call("patch_artifact", {"key": key, "base_version": 2, "summary": "append decision",
-        "ops": [{"op": "append_block", "path": "/decision_log", "content": "2026-06-02 — appended decision."}]})
+        "ops": [{"op": "append_block", "path": "/decision_log", "expected_hash": decision_hash,
+                 "content": "2026-06-02 — appended decision."}]})
     pres = json.loads(text) if not err else {}
     text2, _ = call("get_artifact_block", {"key": key, "paths": ["/decision_log"]})
     dl = json.loads(text2)["blocks"][0]["content"]
@@ -136,7 +140,9 @@ def main():
 
     # 8. checkpoint creates snapshot
     text, err = call("checkpoint_artifact", {"key": key})
-    check("8 checkpoint (snapshot at current version)", (not err) and "Snapshot created" in text and "version 3" in text, text[:200])
+    check("8 checkpoint (snapshot at current version, idempotent)",
+          (not err) and ("Snapshot created" in text or "Snapshot already exists" in text)
+          and "version 3" in text, text[:200])
     text2, err2 = call("get_artifact_snapshot", {"key": key})
     check("8b snapshot includes all active blocks", (not err2) and "Current State" in text2 and "Decision Log" in text2, text2[:120])
 
@@ -168,6 +174,39 @@ def main():
         check("10 migration safety (/body block + v1 snapshot preserved)", has_body and not serr, migrated_key)
     else:
         skip("10 migration safety", "no migrated canonical_artifacts on this DB (fresh staging?)")
+
+    # 11. accepted versions carry exact reconstructable block state
+    text, err = call("get_artifact_snapshot", {"key": key, "version": 3, "include_block_state": True})
+    snap = json.loads(text) if not err else {}
+    check("11 accepted snapshot is reconstructable",
+          (not err) and snap.get("reconstructable") is True
+          and any(b.get("path") == "/current_state" for b in snap.get("block_state", [])), text[:240])
+
+    # 12. authority-sensitive artifacts start gated and agent patches become proposals
+    gated_key = f"v3_gate_verify_{int(time.time())}"
+    text, err = call("create_artifact", {
+        "key": gated_key, "title": "V3 Gate Verify", "kind": "policy",
+        "metadata": {"authority_level": "approved_instruction"},
+        "blocks": [{"path": "/body", "content": "Initial gated content."}],
+    })
+    mt, me = call("get_artifact_manifest", {"key": gated_key})
+    gated = json.loads(mt) if not me else {}
+    body = next((b for b in gated.get("blocks", []) if b.get("path") == "/body"), {})
+    check("12 sensitive create begins draft + human_gate",
+          (not err) and gated.get("status") == "draft" and gated.get("review_policy") == "human_gate", mt[:240])
+    text, err = call("patch_artifact", {
+        "key": gated_key,
+        "base_version": gated.get("current_version"),
+        "summary": "proposal routing test",
+        "ops": [{"op": "replace_block", "path": "/body", "expected_hash": body.get("hash"), "content": "Proposed gated content."}],
+    })
+    routed = json.loads(text) if not err else {}
+    mt2, _ = call("get_artifact_manifest", {"key": gated_key})
+    check("12b gated agent patch becomes proposal without applying",
+          (not err) and routed.get("routed_to_review") is True
+          and json.loads(mt2).get("current_version") == gated.get("current_version"), text[:240])
+    check("12c shared-key MCP exposes no review authority",
+          "review_artifact_change" not in tool_names, ", ".join(sorted(tool_names)))
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped.")
     sys.exit(2 if FAIL else 0)

@@ -3,7 +3,9 @@
 
 ## Decision
 
-ECOS::BRAIN runs as **one MCP server**, deployed as a Supabase Edge Function called `ecb-mcp` (Effortless Connection Brain). All 31 MCP tools — across BRAIN (semantic memory) and ECOS (action on memory) domains — are hosted in this single server. Tool prefix is `mcp__ecb__*`.
+ECOS::BRAIN runs as **one MCP server**, deployed as a Supabase Edge Function called `ecb-mcp`
+(Effortless Connection Brain). All 58 tools in current source — across BRAIN (semantic memory) and
+ECOS (action on memory) domains — are hosted in this single server. Tool prefix is `mcp__ecb__*`.
 
 There is no `open-brain-mcp` and no `ecos-mcp` going forward. Any reference to those names in BRAIN entries, plan files, or historical docs is documenting prior state, not current architecture.
 
@@ -27,11 +29,15 @@ This rewrite exists to make the canon-aligned position the load-bearing one in t
 
 ## Code organization
 
-The 31 tools are organized into 8 per-domain TypeScript modules under `~/ecos/supabase/functions/ecb-mcp/tools/`:
+The 58 tools are organized into 13 per-domain TypeScript modules under
+`~/ecos/supabase/functions/ecb-mcp/tools/`:
 
 | Module | Tools | Count |
 |---|---|---|
-| `brain.ts` | search_thoughts, list_thoughts, thought_stats, capture_thought, update_thought, delete_thought | 6 |
+| `thoughts.ts` | thought capture, search, list, stats, update/delete, supersession | 8 |
+| `pulse.ts` | pulse logging and recent-pulse reads | 2 |
+| `handoff.ts` | handoff events and snapshots | 4 |
+| `boot.ts` | bundled boot context | 1 |
 | `contacts.ts` | add_contact, search_contacts, log_interaction, get_contact_history, get_follow_ups_due, update_contact, get_contacts_by_domain, set_administrative_status | 8 |
 | `opportunities.ts` | create_opportunity | 1 |
 | `billing.ts` | log_service_call, get_client_service_history, get_unbilled_work, create_billing_entry, update_billing_status | 5 |
@@ -39,10 +45,15 @@ The 31 tools are organized into 8 per-domain TypeScript modules under `~/ecos/su
 | `brain-bridge.ts` | link_thought_to_contact, get_linked_thoughts, search_brain_for_contact | 3 |
 | `briefing.ts` | get_briefing_context | 1 |
 | `taste.ts` | capture_taste_preference, update_taste_preference, list_taste_preferences | 3 |
+| `artifacts.ts` | Artifact v2/v3 read, patch, proposal, snapshot, and reindex tools | 15 |
+| `entities.ts` | entity create/search/link tools | 3 |
 
 Each module exports `register(registrar, supabase, helpers)`. Shared utilities (`getEmbedding`, `extractMetadata`, constants like `ECOS_USER_ID`, the tracked registrar wrapper) live in `helpers.ts`.
 
-The top-level `index.ts` is under 100 lines and consists of: imports, supabase client creation, McpServer creation, `createTrackedRegistrar(server)`, sequential `register(...)` calls, count assertion (`registrar.getRegisteredNames().length === 31`), Hono setup with CORS-then-auth middleware order.
+The top-level `index.ts` consists of imports, Supabase client creation, McpServer creation,
+`createTrackedRegistrar(server)`, sequential `register(...)` calls, count assertion
+(`registrar.getRegisteredNames().length === 58`), and Hono setup with CORS-then-auth middleware
+order.
 
 ## Tracked tool registration (load-bearing safety)
 
@@ -53,7 +64,10 @@ const registrar = createTrackedRegistrar(server);
 // Modules call registrar.registerTool(...) instead of server.registerTool(...)
 ```
 
-The wrapper records every name in a private `Set<string>` and throws synchronously on duplicate. After all modules have registered, `index.ts` asserts the recorded count equals 31. This makes silent name collisions impossible and catches drift in expected count at startup, not in production.
+The wrapper records every name in a private `Set<string>` and throws synchronously on duplicate.
+After all modules have registered, `index.ts` asserts the recorded count equals 58. This makes
+silent name collisions impossible and catches drift in expected count at startup, not in
+production.
 
 ## Authentication
 

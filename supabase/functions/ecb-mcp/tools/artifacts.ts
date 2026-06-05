@@ -1,4 +1,4 @@
-// Artifacts tools — Artifact v2 (patch-based, block-addressable, versioned).
+// Artifacts tools — Artifact v2/v3 (patch engine + governed human door).
 //
 // Storage engine: artifacts / artifact_blocks / artifact_revisions /
 // artifact_snapshots / artifact_block_embeddings (migration 20260602100000).
@@ -6,29 +6,26 @@
 // concurrency), not whole-body replacement. Full-body replace survives only as
 // the admin/import/repair tool replace_artifact_body.
 //
-// Governance = audit-only: a patch applies live and is recorded as one immutable
-// artifact_revisions row. There is no draft/approve gate (the old approve_artifact
-// path is retired with v2).
+// Governance = authority-sensitive hybrid: a patch applies live and is recorded
+// as one immutable artifact_revisions row for live_audit artifacts. Artifact v3 adds an
+// authority-sensitive human_gate: agent patches to gated artifacts and all
+// authority/lifecycle operations become review proposals before they apply.
 //
-// 12 tools: create_artifact, get_artifact (compat), get_artifact_manifest,
+// 15 tools: create_artifact, get_artifact (compat), get_artifact_manifest,
 //   get_artifact_block, patch_artifact, search_artifacts, checkpoint_artifact,
 //   get_artifact_snapshot, replace_artifact_body, list_artifacts, link_artifact,
-//   reindex_artifact_embeddings.
+//   reindex_artifact_embeddings, propose_artifact_patch,
+//   list_artifact_change_proposals, get_artifact_change_proposal.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
 import { errorResult, textResult } from "../lib/format.ts";
 
 type Supa = Parameters<RegisterFn>[1];
 type GetEmbedding = (t: string) => Promise<number[]>;
 
 const EMBED_SPLIT_THRESHOLD = 8000; // chars; larger blocks are chunked for embedding only
-
-// ─── SHA-256 (Web Crypto) — hex of exact content; matches SQL encode(digest(...)) ─
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
 
 // ─── Code-fence-aware markdown chunker (embedding sub-chunks for oversized blocks
 //     AND section detection for replace_artifact_body). Unchanged from v1. ────────
@@ -107,7 +104,7 @@ function deriveTitle(path: string): string {
   return seg.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
-interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; current_version: number; metadata: Record<string, unknown>; created_at: string; updated_at: string }
+interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; created_at: string; updated_at: string }
 interface BlockRow { id: string; artifact_id: string; path: string; title: string | null; content: string; content_hash: string; version: number; sort_order: number; metadata: Record<string, unknown>; updated_at: string }
 
 async function getArtifactByKey(supabase: Supa, key: string): Promise<ArtifactRow | null> {
@@ -121,6 +118,19 @@ async function getArtifactById(supabase: Supa, id: string): Promise<ArtifactRow 
 
 function isArchived(b: BlockRow): boolean {
   return (b.metadata as { status?: string } | null)?.status === "archived";
+}
+
+function requiresHumanReview(artifact: ArtifactRow, ops: Record<string, unknown>[]): boolean {
+  if (artifact.review_policy === "human_gate") return true;
+  return ops.some((op) => {
+    const kind = op.op;
+    if (kind === "set_artifact_status" || kind === "set_review_policy") return true;
+    if (kind !== "update_artifact_metadata") return false;
+    const patch = op.metadata_patch;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return false;
+    const metadataPatch = patch as Record<string, unknown>;
+    return "authority_level" in metadataPatch || "tags" in metadataPatch;
+  });
 }
 
 async function loadBlocks(supabase: Supa, artifactId: string, includeArchived: boolean): Promise<BlockRow[]> {
@@ -210,16 +220,21 @@ async function compileArtifact(supabase: Supa, a: ArtifactRow, format: "markdown
 
 // Internal checkpoint: compile + store snapshot for current_version (idempotent unless force).
 async function doCheckpoint(supabase: Supa, a: ArtifactRow, format: "markdown" | "json", includeArchived: boolean, force: boolean): Promise<{ created: boolean; version: number; content: string }> {
-  const content = await compileArtifact(supabase, a, format, includeArchived);
-  const hash = await sha256(content);
   const { data: existing } = await supabase.from("artifact_snapshots")
-    .select("id").eq("artifact_id", a.id).eq("version", a.current_version).maybeSingle();
-  if (existing && !force) return { created: false, version: a.current_version, content };
-  await supabase.from("artifact_snapshots").upsert(
-    { artifact_id: a.id, version: a.current_version, compiled_content: content, content_hash: hash, metadata: { format } },
-    { onConflict: "artifact_id,version" },
-  );
-  return { created: true, version: a.current_version, content };
+    .select("id, compiled_content").eq("artifact_id", a.id).eq("version", a.current_version).maybeSingle();
+  if (existing && !force) {
+    return { created: false, version: a.current_version, content: existing.compiled_content as string };
+  }
+  const { error } = await supabase.rpc("write_artifact_snapshot", {
+    p_artifact_id: a.id,
+    p_version: a.current_version,
+    p_metadata: { format: "markdown", requested_format: format, include_archived: includeArchived, source: "mcp_checkpoint" },
+  });
+  if (error) throw new Error(`Snapshot failed: ${error.message}`);
+  const { data: snapshot, error: readError } = await supabase.from("artifact_snapshots")
+    .select("compiled_content").eq("artifact_id", a.id).eq("version", a.current_version).single();
+  if (readError) throw new Error(`Snapshot readback failed: ${readError.message}`);
+  return { created: true, version: a.current_version, content: snapshot.compiled_content as string };
 }
 
 // Map RPC RAISE messages → user-facing patch errors (spec phrasings).
@@ -234,7 +249,10 @@ function formatPatchError(msg: string): string {
 
 // ─── zod shapes ────────────────────────────────────────────────────────────────
 const PatchOp = z.object({
-  op: z.enum(["create_block", "replace_block", "append_block", "delete_block", "rename_block", "update_block_metadata"]),
+  op: z.enum([
+    "create_block", "replace_block", "append_block", "delete_block", "rename_block", "update_block_metadata",
+    "update_artifact_metadata", "set_artifact_status", "set_review_policy",
+  ]),
   path: z.string().optional(),
   from_path: z.string().optional(),
   to_path: z.string().optional(),
@@ -243,6 +261,8 @@ const PatchOp = z.object({
   expected_hash: z.string().optional(),
   sort_order: z.number().int().optional(),
   create_if_missing: z.boolean().optional(),
+  status: z.string().optional(),
+  review_policy: z.enum(["live_audit", "human_gate"]).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   metadata_patch: z.record(z.string(), z.unknown()).optional(),
 });
@@ -264,7 +284,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Create Artifact",
       description:
-        "Create a durable, addressable v2 artifact with a stable key and optional initial blocks. Returns version 1 if blocks are provided, else version 0. Block embeddings are generated for non-empty blocks. For active situation tracking use kind 'strategy_tracker'.",
+        "Create a durable, addressable artifact with a stable key and optional initial blocks. Authority-sensitive agent-created artifacts begin as human-gated drafts and cannot self-promote. Returns version 1 if blocks are provided, else version 0. Block embeddings are generated for non-empty blocks.",
       inputSchema: {
         key:            z.string().describe("Stable unique identifier, e.g. ttc_governance_strategy"),
         title:          z.string(),
@@ -278,10 +298,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const { data, error } = await supabase.rpc("create_artifact_v2", {
           p_key: key, p_title: title, p_kind: kind ?? "document",
-          p_metadata: metadata ?? {}, p_blocks: blocks ?? [], p_actor: "mcp",
+          p_metadata: metadata ?? {}, p_blocks: blocks ?? [], p_actor: "agent:mcp",
         });
         if (error) return errorResult(`Failed to create artifact: ${error.message}`);
-        const res = data as { artifact_id: string; key: string; version: number; blocks: { block_id: string; path: string; content: string }[] };
+        const res = data as {
+          artifact_id: string; key: string; version: number; status: string;
+          review_policy: string; blocks: { block_id: string; path: string; content: string }[];
+        };
 
         const warnings: string[] = [];
         for (const b of res.blocks ?? []) {
@@ -295,6 +318,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         return textResult([
           `Created artifact "${res.key}" at version ${res.version} with ${(res.blocks ?? []).length} block(s).`,
           `  artifact_id: ${res.artifact_id}`,
+          `  status: ${res.status} | review_policy: ${res.review_policy}`,
           warnings.length ? `  ⚠ embedding warnings:\n   - ${warnings.join("\n   - ")}` : `  Block embeddings generated.`,
         ].join("\n"));
       } catch (err: unknown) {
@@ -321,7 +345,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (!a) return errorResult(`Artifact not found: ${key}`);
         const blocks = await loadBlocks(supabase, a.id, include_archived ?? false);
         const manifest = {
-          key: a.key, title: a.title, kind: a.kind, status: a.status,
+          key: a.key, title: a.title, kind: a.kind, status: a.status, review_policy: a.review_policy,
           current_version: a.current_version, metadata: a.metadata,
           blocks: blocks.map(b => ({
             path: b.path, title: b.title ?? deriveTitle(b.path),
@@ -371,21 +395,46 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Patch Artifact",
       description:
-        "Apply block-level patch operations atomically (all-or-nothing). Requires base_version (artifact-level optimistic lock) and, for each touched existing block, expected_hash (block-level optimistic lock). This is the NORMAL write path — never rewrite a whole document. Ops: create_block, replace_block, append_block (logs), delete_block, rename_block, update_block_metadata.",
+        "Normal agent write path. Applies an atomic patch immediately for live_audit artifacts, but automatically creates a pending human-review proposal for human_gate artifacts and authority/lifecycle/review-policy operations. Existing-block proposal ops require expected_hash. Never rewrite a whole document.",
       inputSchema: {
         key:             z.string(),
         base_version:    z.number().int().describe("Must equal the artifact's current_version (from the manifest)"),
         ops:             z.array(PatchOp).min(1),
         summary:         z.string().describe("Short human-readable summary of the change"),
         create_snapshot: z.boolean().optional().default(false),
-        actor:           z.string().optional().default("mcp"),
+        actor:           z.string().optional().default("mcp").describe("Agent identifier; actor type is always recorded as agent"),
+        source_refs:     z.record(z.string(), z.unknown()).optional(),
       },
+      annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, ops, summary, create_snapshot, actor }) => {
+    async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs }) => {
       try {
-        const { data, error } = await supabase.rpc("apply_artifact_patch", {
+        const current = await getArtifactByKey(supabase, key);
+        if (!current) return errorResult(`Artifact not found: ${key}`);
+
+        if (requiresHumanReview(current, ops as Record<string, unknown>[])) {
+          const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
+            p_key: key,
+            p_base_version: base_version,
+            p_ops: ops,
+            p_summary: summary,
+            p_actor_type: "agent",
+            p_actor_id: actor ?? "mcp",
+            p_source_refs: source_refs ?? {},
+            p_metadata: { routed_by: "patch_artifact" },
+          });
+          if (error) return errorResult(formatPatchError(error.message));
+          return textResult(JSON.stringify({
+            ...(data as Record<string, unknown>),
+            routed_to_review: true,
+            message: "Patch was not applied. It is waiting for explicit human review.",
+          }, null, 2));
+        }
+
+        const { data, error } = await supabase.rpc("apply_artifact_agent_patch_tx", {
           p_key: key, p_base_version: base_version, p_ops: ops,
-          p_summary: summary, p_actor: actor ?? "mcp", p_metadata: {}, p_admin: false,
+          p_summary: summary, p_actor_id: actor ?? "mcp",
+          p_source_refs: source_refs ?? {}, p_admin: false,
         });
         if (error) return errorResult(formatPatchError(error.message));
         const res = data as { artifact_id: string; key: string; old_version: number; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
@@ -398,7 +447,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
         return textResult(JSON.stringify({
           key: res.key, old_version: res.old_version, new_version: res.new_version,
-          changed_paths: res.changed_paths, summary,
+          changed_paths: res.changed_paths, summary, review_policy: current.review_policy,
           ...(warnings.length ? { embedding_warnings: warnings } : {}),
         }, null, 2));
       } catch (err: unknown) {
@@ -412,29 +461,33 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "search_artifacts",
     {
       title: "Search Artifacts",
-      description: "Block-level semantic search across artifacts. Returns matching blocks with artifact key, block path, title, similarity, and a content excerpt — not whole documents. Filter by kind or a single artifact key.",
+      description: "Block-level semantic search across active artifacts by default. Returns matching blocks with artifact key, status, block path, title, similarity, and a content excerpt. Pass status='draft' for explicit draft/review retrieval or include_non_active=true to search all statuses.",
       inputSchema: {
         query:     z.string(),
         limit:     z.number().int().min(1).max(50).optional().default(10),
         threshold: z.number().optional().default(0.38),
         kind:      z.string().optional(),
         key:       z.string().optional(),
+        status:    z.string().optional().default("active"),
+        include_non_active: z.boolean().optional().default(false),
       },
+      annotations: READ_ONLY,
     },
-    async ({ query, limit, threshold, kind, key }) => {
+    async ({ query, limit, threshold, kind, key, status, include_non_active }) => {
       try {
         const qEmb = await getEmbedding(query);
         const { data, error } = await supabase.rpc("match_artifact_blocks", {
           query_embedding: qEmb, match_threshold: threshold ?? 0.38, match_count: limit ?? 10,
           filter_kind: kind ?? null, filter_key: key ?? null,
+          filter_status: include_non_active ? null : status ?? "active",
         });
         if (error) return errorResult(`Search error: ${error.message}`);
-        type R = { artifact_key: string; artifact_title: string; kind: string; block_path: string; block_title: string | null; content: string; similarity: number };
+        type R = { artifact_key: string; artifact_title: string; kind: string; artifact_status: string; block_path: string; block_title: string | null; content: string; similarity: number };
         const rows = (data ?? []) as R[];
         if (!rows.length) return textResult(`No artifact blocks found matching "${query}".`);
         const out = rows.map((r, i) => [
           `--- Result ${i + 1} (${(r.similarity * 100).toFixed(1)}% match) ---`,
-          `Artifact: ${r.artifact_title} [${r.kind}] (key: ${r.artifact_key})`,
+          `Artifact: ${r.artifact_title} [${r.kind}; ${r.artifact_status}] (key: ${r.artifact_key})`,
           `Block: ${r.block_path}${r.block_title ? ` — ${r.block_title}` : ""}`,
           "",
           r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
@@ -451,7 +504,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "checkpoint_artifact",
     {
       title: "Checkpoint Artifact",
-      description: "Compile the current blocks into a full snapshot stored at the current version. Idempotent for a given version unless force=true.",
+      description: "Write the database-canonical markdown + exact block-state snapshot for the current version. Idempotent unless force=true; legacy format requests are recorded but normalized to canonical markdown.",
       inputSchema: {
         key:              z.string(),
         format:           z.enum(["markdown", "json"]).optional().default("markdown"),
@@ -482,17 +535,30 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       inputSchema: {
         key:     z.string(),
         version: z.number().int().optional(),
+        include_block_state: z.boolean().optional().default(false),
       },
+      annotations: READ_ONLY,
     },
-    async ({ key, version }) => {
+    async ({ key, version, include_block_state }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`);
-        let q = supabase.from("artifact_snapshots").select("version, compiled_content").eq("artifact_id", a.id);
+        let q = supabase.from("artifact_snapshots").select("version, compiled_content, block_state, metadata").eq("artifact_id", a.id);
         q = version != null ? q.eq("version", version) : q.order("version", { ascending: false }).limit(1);
         const { data } = await q.maybeSingle();
-        const snap = data as { version: number; compiled_content: string } | null;
-        if (snap) return textResult(`# Snapshot v${snap.version}\n\n${snap.compiled_content}`);
+        const snap = data as { version: number; compiled_content: string; block_state: unknown; metadata: Record<string, unknown> } | null;
+        if (snap) {
+          if (include_block_state) {
+            return textResult(JSON.stringify({
+              key: a.key,
+              version: snap.version,
+              reconstructable: snap.metadata?.reconstructable === true,
+              compiled_content: snap.compiled_content,
+              block_state: snap.block_state,
+            }, null, 2));
+          }
+          return textResult(`# Snapshot v${snap.version}\n\n${snap.compiled_content}`);
+        }
         if (version != null) return errorResult(`No snapshot for "${key}" at version ${version}.`);
         const compiled = await compileArtifact(supabase, a, "markdown", false);
         return textResult(`# Compiled on demand (no stored snapshot) — v${a.current_version}\n\n${compiled}`);
@@ -520,7 +586,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (!a) return errorResult("Artifact not found (provide key or artifact_id).");
         const header = [
           `## ${a.title}`, `key: ${a.key} | id: ${a.id}`,
-          `Kind: ${a.kind} | Status: ${a.status} | Version: ${a.current_version}`,
+          `Kind: ${a.kind} | Status: ${a.status} | Review: ${a.review_policy} | Version: ${a.current_version}`,
           `Updated: ${new Date(a.updated_at).toLocaleDateString()}`,
         ];
         if (include_body ?? true) header.push("", await compileArtifact(supabase, a, "markdown", false));
@@ -536,19 +602,22 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "list_artifacts",
     {
       title: "List Artifacts",
-      description: "List v2 artifacts with optional filters (kind, status). Returns headers with key/title/kind/version.",
+      description: "List artifacts with optional filters (kind, status, review_policy). Returns headers with key/title/kind/version and governance state.",
       inputSchema: {
         kind:   z.string().optional(),
         status: z.string().optional(),
+        review_policy: z.enum(["live_audit", "human_gate"]).optional(),
         limit:  z.number().int().min(1).max(100).optional().default(20),
       },
+      annotations: READ_ONLY,
     },
-    async ({ kind, status, limit }) => {
+    async ({ kind, status, review_policy, limit }) => {
       try {
-        let q = supabase.from("artifacts").select("id, key, title, kind, status, current_version, metadata, updated_at")
+        let q = supabase.from("artifacts").select("id, key, title, kind, status, review_policy, current_version, metadata, updated_at")
           .order("updated_at", { ascending: false }).limit(limit ?? 20);
         if (kind) q = q.eq("kind", kind);
         if (status) q = q.eq("status", status);
+        if (review_policy) q = q.eq("review_policy", review_policy);
         const { data, error } = await q;
         if (error) return errorResult(`Error: ${error.message}`);
         const rows = (data ?? []) as ArtifactRow[];
@@ -556,7 +625,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         const lines = [`${rows.length} artifact(s):\n`];
         for (const a of rows) {
           lines.push(`• ${a.title} [${a.kind}] — key: ${a.key}`);
-          lines.push(`  v${a.current_version} | ${a.status} | Updated: ${new Date(a.updated_at).toLocaleDateString()}`);
+          lines.push(`  v${a.current_version} | ${a.status} | ${a.review_policy} | Updated: ${new Date(a.updated_at).toLocaleDateString()}`);
         }
         return textResult(lines.join("\n"));
       } catch (err: unknown) {
@@ -595,6 +664,122 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     },
   );
 
+  // ── propose_artifact_patch ─────────────────────────────────────────────────
+  registrar.registerTool(
+    "propose_artifact_patch",
+    {
+      title: "Propose Artifact Patch",
+      description:
+        "Create a pending artifact change proposal without changing current blocks, embeddings, or authority. Existing-block ops MUST include expected_hash. Use when a change should be prepared for explicit human review.",
+      inputSchema: {
+        key:                    z.string(),
+        base_version:           z.number().int(),
+        ops:                    z.array(PatchOp).min(1),
+        summary:                z.string(),
+        actor:                  z.string().optional().default("mcp"),
+        source_refs:            z.record(z.string(), z.unknown()).optional(),
+        supersedes_proposal_id: z.string().uuid().optional(),
+      },
+      annotations: WRITE_TRANSACTIONAL,
+    },
+    async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id }) => {
+      try {
+        const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
+          p_key: key,
+          p_base_version: base_version,
+          p_ops: ops,
+          p_summary: summary,
+          p_actor_type: "agent",
+          p_actor_id: actor ?? "mcp",
+          p_source_refs: source_refs ?? {},
+          p_supersedes_proposal_id: supersedes_proposal_id ?? null,
+          p_metadata: { submitted_via: "propose_artifact_patch" },
+        });
+        if (error) return errorResult(formatPatchError(error.message));
+        return textResult(JSON.stringify({
+          ...(data as Record<string, unknown>),
+          message: "Proposal created. Current artifact state is unchanged.",
+        }, null, 2));
+      } catch (err: unknown) {
+        return errorResult(`Error: ${(err as Error).message}`);
+      }
+    },
+  );
+
+  // ── list_artifact_change_proposals ─────────────────────────────────────────
+  registrar.registerTool(
+    "list_artifact_change_proposals",
+    {
+      title: "List Artifact Change Proposals",
+      description: "List pending/recent artifact change proposals for human review. Read-only.",
+      inputSchema: {
+        status: z.enum(["pending", "revision_requested", "approved", "rejected", "conflicted", "superseded"]).optional().default("pending"),
+        key:    z.string().optional(),
+        limit:  z.number().int().min(1).max(100).optional().default(20),
+      },
+      annotations: READ_ONLY,
+    },
+    async ({ status, key, limit }) => {
+      try {
+        let artifactId: string | null = null;
+        if (key) {
+          const artifact = await getArtifactByKey(supabase, key);
+          if (!artifact) return errorResult(`Artifact not found: ${key}`);
+          artifactId = artifact.id;
+        }
+        let q = supabase.from("artifact_change_proposals")
+          .select("id, artifact_id, base_version, summary, proposer_actor_type, proposer_actor_id, status, review_reason, applied_version, created_at, updated_at")
+          .order("created_at", { ascending: false })
+          .limit(limit ?? 20);
+        if (status) q = q.eq("status", status);
+        if (artifactId) q = q.eq("artifact_id", artifactId);
+        const { data, error } = await q;
+        if (error) return errorResult(`Error: ${error.message}`);
+        const proposals = (data ?? []) as Record<string, unknown>[];
+        const ids = Array.from(new Set(proposals.map(p => p.artifact_id as string)));
+        const { data: artifacts } = ids.length
+          ? await supabase.from("artifacts").select("id, key, title, kind, status, review_policy, current_version").in("id", ids)
+          : { data: [] };
+        const byId = new Map(((artifacts ?? []) as Record<string, unknown>[]).map(a => [a.id as string, a]));
+        return textResult(JSON.stringify(proposals.map(p => ({
+          ...p,
+          artifact: byId.get(p.artifact_id as string) ?? null,
+        })), null, 2));
+      } catch (err: unknown) {
+        return errorResult(`Error: ${(err as Error).message}`);
+      }
+    },
+  );
+
+  // ── get_artifact_change_proposal ───────────────────────────────────────────
+  registrar.registerTool(
+    "get_artifact_change_proposal",
+    {
+      title: "Get Artifact Change Proposal",
+      description: "Read one proposal, its artifact governance state, and its append-only review event trail. Does not alter the proposal.",
+      inputSchema: {
+        proposal_id: z.string().uuid(),
+      },
+      annotations: READ_ONLY,
+    },
+    async ({ proposal_id }) => {
+      try {
+        const { data: proposal, error } = await supabase.from("artifact_change_proposals")
+          .select("*").eq("id", proposal_id).maybeSingle();
+        if (error || !proposal) return errorResult(`Proposal not found: ${proposal_id}`);
+        const p = proposal as Record<string, unknown>;
+        const { data: artifact } = await supabase.from("artifacts")
+          .select("id, key, title, kind, status, review_policy, current_version, metadata")
+          .eq("id", p.artifact_id).maybeSingle();
+        const { data: events } = await supabase.from("artifact_review_events")
+          .select("*").eq("proposal_id", proposal_id).order("created_at", { ascending: true });
+        return textResult(JSON.stringify({ proposal: p, artifact, events: events ?? [] }, null, 2));
+      } catch (err: unknown) {
+        return errorResult(`Error: ${(err as Error).message}`);
+      }
+    },
+  );
+
   // ── replace_artifact_body (ADMIN / IMPORT / REPAIR ONLY) ─────────────────────
   registrar.registerTool(
     "replace_artifact_body",
@@ -609,6 +794,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         summary:      z.string(),
         mode:         z.enum(["admin_import", "migration", "repair"]),
       },
+      annotations: WRITE_TRANSACTIONAL,
     },
     async ({ key, base_version, body, summary, mode }) => {
       try {
@@ -619,19 +805,47 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         const newBlocks = splitBodyIntoBlocks(body);
         const current = await loadBlocks(supabase, a.id, false);
         const currentPaths = new Set(current.map(b => b.path));
+        const currentByPath = new Map(current.map(b => [b.path, b]));
         const newPaths = new Set(newBlocks.map(b => b.path));
 
         const ops: Record<string, unknown>[] = [];
         for (const nb of newBlocks) {
           ops.push(currentPaths.has(nb.path)
-            ? { op: "replace_block", path: nb.path, content: nb.content, title: nb.title }
+            ? {
+                op: "replace_block", path: nb.path, content: nb.content, title: nb.title,
+                expected_hash: currentByPath.get(nb.path)?.content_hash,
+              }
             : { op: "create_block", path: nb.path, content: nb.content, title: nb.title });
         }
-        for (const cp of currentPaths) if (!newPaths.has(cp)) ops.push({ op: "delete_block", path: cp });
+        for (const cp of currentPaths) {
+          if (!newPaths.has(cp)) {
+            ops.push({ op: "delete_block", path: cp, expected_hash: currentByPath.get(cp)?.content_hash });
+          }
+        }
 
-        const { data, error } = await supabase.rpc("apply_artifact_patch", {
+        if (a.review_policy === "human_gate") {
+          const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
+            p_key: key,
+            p_base_version: base_version,
+            p_ops: ops,
+            p_summary: `[${mode}] ${summary}`,
+            p_actor_type: "agent",
+            p_actor_id: `replace_artifact_body:${mode}`,
+            p_source_refs: {},
+            p_metadata: { mode, routed_by: "replace_artifact_body" },
+          });
+          if (error) return errorResult(formatPatchError(error.message));
+          return textResult(JSON.stringify({
+            ...(data as Record<string, unknown>),
+            routed_to_review: true,
+            message: "Full-body replacement was not applied because this artifact is human-gated.",
+          }, null, 2));
+        }
+
+        const { data, error } = await supabase.rpc("apply_artifact_agent_patch_tx", {
           p_key: key, p_base_version: base_version, p_ops: ops,
-          p_summary: `[${mode}] ${summary}`, p_actor: "admin", p_metadata: { mode }, p_admin: true,
+          p_summary: `[${mode}] ${summary}`, p_actor_id: `replace_artifact_body:${mode}`,
+          p_source_refs: { mode }, p_admin: true,
         });
         if (error) return errorResult(formatPatchError(error.message));
         const res = data as { artifact_id: string; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };

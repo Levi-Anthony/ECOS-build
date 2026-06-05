@@ -7,10 +7,12 @@
 
 ```
 MIDDLEWARE_URL = https://lqbrzoicorehwidkdhoi.supabase.co/functions/v1/brain-middleware
-BRAIN_KEY      = d54c89fa2a1db9cac307909b7f59ec46a9c5cf7c79dba763ae992278f2c7abf8
+BRAIN_KEY      = <brain access key from your password manager or local env>
 ```
 
-All requests require the header: `x-brain-key: [BRAIN_KEY]`
+All requests require the header: `x-brain-key: [BRAIN_KEY]`. Do not paste the key
+into chat or commit it to a file; provide it only to the runtime that will make
+the requests.
 
 ---
 

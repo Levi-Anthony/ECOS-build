@@ -1,6 +1,6 @@
 // Tool annotation presets — ECBRAIN V1.
 // Architecture ref: §4.3. Applied to new ECBRAIN tools in Phases 3–4.
-// Existing 41 tools do not use these yet; apply on the first edit of each tool.
+// Some existing tools do not use these yet; apply on the first edit of each tool.
 
 export const READ_ONLY = {
   readOnlyHint:  true,
