@@ -1,12 +1,12 @@
 ---
 name: run-crm-dashboard
-description: Build, launch, screenshot, and drive the ECOS CRM dashboard (apps/crm-dashboard) — the Next.js 14 web app showing contacts, people, BRAIN, follow-ups, taste, weekly, briefings. Use when asked to run, start, launch, serve, screenshot, drive, smoke-test, or visually verify the dashboard / crm-dashboard / ECOS Dashboard.
+description: Build, launch, screenshot, and drive the ECOS CRM dashboard (apps/crm-dashboard) — the Next.js web app showing contacts, people, BRAIN, artifacts, entities, follow-ups, taste, weekly, and briefings. Use when asked to run, start, launch, serve, screenshot, drive, smoke-test, or visually verify the dashboard / crm-dashboard / ECOS Dashboard.
 ---
 
 # Run: crm-dashboard
 
-A **Next.js 14 (App Router)** dashboard that reads ECOS data from Supabase (browser
-`@supabase/supabase-js` with the anon key in `.env.local`). It's driven headlessly by a
+A **Next.js App Router** dashboard that reads ECOS data from Supabase through server-only
+clients configured in `.env.local`. It's driven headlessly by a
 committed **Playwright** harness — `driver.mjs` — which navigates a route, waits for the
 Supabase-backed content to render, writes a full-page screenshot to `shots/`, and prints a
 JSON summary (HTTP status, title, nav, row counts, error/loading detection) so you can assert
@@ -44,7 +44,7 @@ without eyeballing.
    # screenshot one route -> shots/home.png + JSON summary on stdout
    node .claude/skills/run-crm-dashboard/driver.mjs /
 
-   # screenshot every real route -> shots/{home,people,brain,...}.png
+   # screenshot every top-level route -> shots/{home,people,brain,artifacts,entities,...}.png
    node .claude/skills/run-crm-dashboard/driver.mjs all
 
    # interact: click a filter chip, then screenshot the result.
@@ -78,7 +78,7 @@ Useless headless (it just waits); use the agent path above to capture/verify.
 ## Test
 
 ```bash
-npm test      # vitest run — 79 unit tests (lib/logic.ts aggregations, schema, helpers)
+npm test      # vitest run — unit tests for logic, schema contracts, and helpers
 ```
 This is the layer most PRs touch (pure display/aggregation logic in `lib/`). Fast (<1s); run it
 before the browser harness.
@@ -92,7 +92,7 @@ before the browser harness.
   `searchParams.domain` and re-queries Supabase. The domain chips are **`<a href="/?domain=tango">`
   links, not buttons** — `button:has-text(...)` will time out. Click `a:has-text("Tango")` or just
   navigate to `/?domain=tango`.
-- **Live Supabase data.** `.env.local` points at the real project (anon key, RLS-gated reads), so
+- **Live Supabase data.** `.env.local` points at the real project, so
   screenshots show real contacts/thoughts and row counts drift over time. There's no seed/fixture —
   assert on *structure* (columns, "N total", error/loading flags), not exact rows.
 - **The dev server detaches.** `npm run dev … &` survives the shell that launched it; it won't stop

@@ -182,10 +182,24 @@ The existing CRM dashboard is the governed human surface:
 - `/artifacts/review` — pending/conflicted/resolved proposal inbox.
 - `/artifacts/review/:id` — current-versus-proposed diff, approve, edit-and-approve, reject,
   request-revision, and supersede actions.
+- `/entities` and `/entities/:id` — browse the general entity substrate and follow artifact/entity,
+  contact/entity, and entity/entity relationships exposed by artifact provenance.
+
+Until artifact-to-artifact links are supported by `artifact_links`, the artifact detail Human Door
+also resolves a misclassified `thought`/`entity` target ID to an artifact when possible and displays
+an explicit type-mismatch warning. This keeps the valid target navigable without hiding schema debt.
 
 Dashboard writes are server-only. Accepted writes remove stale vectors immediately and request
 changed-block reindexing through ecb-mcp. Configure `ECB_URL` + `ECB_KEY` in the dashboard runtime
 so human edits regenerate embeddings immediately.
+
+Human edit forms return to the artifact or proposal page with a visible accepted/write-warning/error
+result. Block edits that submit unchanged content and governance forms with no changed fields create
+no revision. Browser-submitted block content is normalized to canonical LF line endings before hash
+comparison and persistence. Version/hash conflicts, reviewer authorization failures, invalid
+lifecycle transitions, and pending embedding regeneration are surfaced explicitly without exposing
+raw database errors. Runtimes missing human-authority configuration show a prominent warning and
+disable mutating Human Door controls instead of failing only after submission.
 
 The mutation boundary is database-owned:
 
@@ -250,8 +264,8 @@ blocks.
 ## Verification
 
 `supabase/tests/artifact_v3_human_door.sql` proves direct service-role apply/review/table writes
-cannot approve or bypass gated changes and an allowlisted authenticated human can approve with
-database-derived identity. `scripts/ecb-artifacts-v2-verify.py` drives the deployed MCP through the
-v2 patch-engine acceptance tests plus v3 reconstructable-snapshot, human-gate routing, and no-MCP-
-review-authority tests. Run both locally/CI first, then run the harness against **staging**
-(`ECB_URL` + `ECB_KEY`) before requesting production approval.
+cannot approve or bypass gated changes and an allowlisted authenticated human can approve or apply a
+direct block edit with database-derived identity. `scripts/ecb-artifacts-v2-verify.py` drives the
+deployed MCP through the v2 patch-engine acceptance tests plus v3 reconstructable-snapshot,
+human-gate routing, and no-MCP-review-authority tests. Run both locally/CI first, then run the harness
+against **staging** (`ECB_URL` + `ECB_KEY`) before requesting production approval.

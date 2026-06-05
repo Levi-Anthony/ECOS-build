@@ -44,6 +44,13 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
   const thoughtLinks: ThoughtLink[] = Array.isArray(contact.thought_links) ? contact.thought_links : [];
   const snapshot = snapshotRes.data as PersonSnapshot | null;
   const observations = (observationsRes.data ?? []) as PersonObservation[];
+  const { data: entity } = contact.entity_id
+    ? await supabase
+        .from("entities")
+        .select("id, name, entity_type")
+        .eq("id", contact.entity_id)
+        .maybeSingle()
+    : { data: null };
 
   const daysSinceSnap = snapshot
     ? Math.floor((Date.now() - new Date(snapshot.created_at).getTime()) / 86400000)
@@ -121,6 +128,17 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
             {contact.notes}
           </div>
         )}
+
+        {entity && (
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Entity node</span>
+            <p className="mt-1">
+              <a href={`/entities/${entity.id}`} className="inline-flex min-h-10 items-center text-sm font-medium text-violet-600 hover:text-violet-800">
+                ◇ {entity.name} · {entity.entity_type.replaceAll("_", " ")}
+              </a>
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Opportunities */}
@@ -155,10 +173,10 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
           </h2>
           <div className="space-y-2">
             {thoughtLinks.map((link: ThoughtLink) => (
-              <div key={link.thought_id} className="py-2 border-b border-gray-50 last:border-0">
+              <a key={link.thought_id} href={`/brain/${link.thought_id}`} className="block py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50">
                 <p className="text-sm text-gray-700">{link.content_preview}</p>
                 <p className="text-xs text-gray-400 mt-1">{new Date(link.linked_at).toLocaleDateString()} · {link.thought_id}</p>
-              </div>
+              </a>
             ))}
           </div>
         </div>

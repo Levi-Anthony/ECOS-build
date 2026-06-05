@@ -1,10 +1,12 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Artifact, ArtifactBlock, ArtifactLink, ArtifactRevision } from "@/lib/supabase";
 import { relativeAge } from "@/lib/logic";
-import { ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
+import { ActionFeedbackBanner, ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
 import { Markdown } from "@/lib/markdown";
 import { CopyButton } from "@/lib/copy-button";
 import { editArtifactBlockAction, updateArtifactGovernanceAction } from "@/app/artifacts/actions";
+import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
+import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
 import { notFound } from "next/navigation";
 
 // jsonb metadata is loosely typed — read fields with guards.
@@ -32,9 +34,18 @@ const buildFullDoc = (title: string, blocks: ArtifactBlock[]): string => {
   return [`# ${title}`, ...sections].join("\n\n");
 };
 
-export default async function ArtifactDetailPage({ params }: { params: Promise<{ key: string }> }) {
-  const { key: encodedKey } = await params;
+export default async function ArtifactDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ key: string }>;
+  searchParams: Promise<{ action_result?: string; action_label?: string; action_message?: string }>;
+}) {
+  const [{ key: encodedKey }, actionParams] = await Promise.all([params, searchParams]);
   const key = decodeURIComponent(encodedKey);
+  const actionFeedback = readArtifactActionFeedback(actionParams);
+  const canonicalHref = `/artifacts/${encodeURIComponent(key)}`;
+  const humanAuthority = getHumanAuthorityConfiguration();
 
   const { data: artifactRow, error } = await supabase
     .from("artifacts")
@@ -103,6 +114,19 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
     ...(entityRows.data ?? []).map((row) => [row.id, `${row.name} (${row.entity_type})`] as const),
     ...(opportunityRows.data ?? []).map((row) => [row.id, row.title] as const),
   ]);
+  const unresolvedLinkedIds = links
+    .map((link) => link.linked_id)
+    .filter((linkedId) => !linkedLabels.has(linkedId));
+  const { data: linkedArtifactRows } = unresolvedLinkedIds.length
+    ? await supabase
+        .from("artifacts")
+        .select("id, key, title")
+        .in("id", unresolvedLinkedIds)
+    : { data: [] };
+  const linkedArtifactTargets = new Map(
+    (linkedArtifactRows ?? []).map((row) => [row.id, { key: row.key, title: row.title }] as const)
+  );
+  for (const [id, target] of linkedArtifactTargets) linkedLabels.set(id, `${target.title} (artifact)`);
 
   const authorityLevel = str(meta, "authority_level");
   const scope = str(meta, "scope");
@@ -139,8 +163,11 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
   ];
 
   const linkedHref = (link: ArtifactLink) => {
+    const artifactTarget = linkedArtifactTargets.get(link.linked_id);
+    if (artifactTarget) return `/artifacts/${encodeURIComponent(artifactTarget.key)}`;
     if (link.linked_type === "thought") return `/brain/${link.linked_id}`;
     if (link.linked_type === "contact") return `/contacts/${link.linked_id}`;
+    if (link.linked_type === "entity") return `/entities/${link.linked_id}`;
     return null;
   };
   const blockNav = blocks.map((block, index) => ({
@@ -163,6 +190,17 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
         warnings={warnings}
         fields={reviewFields}
       />
+
+      {actionFeedback && <ActionFeedbackBanner {...actionFeedback} clearHref={canonicalHref} />}
+
+      {!humanAuthority.configured && (
+        <section role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
+          <p className="text-xs font-semibold uppercase tracking-wide">Human editing unavailable</p>
+          <p className="text-sm mt-1">
+            This runtime is missing: <span className="font-mono text-xs">{humanAuthority.missing.join(", ")}</span>.
+          </p>
+        </section>
+      )}
 
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
         <h2 className="font-semibold mb-3 text-sm text-gray-500 uppercase tracking-wide">Summary and metadata</h2>
@@ -241,9 +279,13 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
             <input name="reason" required className="min-h-10 w-full rounded-lg border border-gray-200 px-3" placeholder="Why this authority or lifecycle change is appropriate" />
           </label>
           <div className="sm:col-span-3">
-            <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+            <button
+              disabled={!humanAuthority.configured}
+              className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
               Apply human governance change
             </button>
+            <p className="text-xs text-gray-400 mt-2">Creates a new accepted version only when a field changes. Stale forms are rejected.</p>
           </div>
         </form>
       </details>
@@ -366,9 +408,13 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
                           placeholder="Describe the human edit"
                           className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
                         />
-                        <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+                        <button
+                          disabled={!humanAuthority.configured}
+                          className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                        >
                           Save new accepted version
                         </button>
+                        <p className="text-xs text-gray-400">Unchanged content creates no revision. Stale versions or block hashes are rejected.</p>
                       </form>
                     </details>
                   )}
@@ -398,6 +444,11 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <span className={chipClass("blue")}>artifact_link: {link.relationship_type}</span>
                     <span className={chipClass("gray")}>{link.linked_type}</span>
+                    {linkedArtifactTargets.has(link.linked_id) && (
+                      <span className={chipClass("amber")} title={`Stored as ${link.linked_type}, but the target ID resolves to an artifact.`}>
+                        type mismatch → artifact
+                      </span>
+                    )}
                     <span className="text-xs text-gray-400">{new Date(link.created_at).toLocaleDateString()}</span>
                   </div>
                   <p className="font-mono text-xs text-gray-600 break-all">{link.linked_id}</p>

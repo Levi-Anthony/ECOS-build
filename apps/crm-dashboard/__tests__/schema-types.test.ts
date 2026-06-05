@@ -22,6 +22,8 @@ import type {
   PersonSnapshot,
   Artifact,
   ArtifactChangeProposal,
+  Entity,
+  EntityLink,
 } from "@/lib/supabase";
 
 // ─── Artifact v3 human door ─────────────────────────────────────────────────
@@ -66,6 +68,39 @@ describe("Artifact v3 governance types", () => {
       updated_at: "2026-06-04",
     };
     expect(proposal.ops[0].expected_hash).toBe("hash");
+  });
+});
+
+// ─── Entity human door ──────────────────────────────────────────────────────
+
+describe("Entity types", () => {
+  it("matches the entities table", () => {
+    const entity: Entity = {
+      id: "e1",
+      name: "Example",
+      entity_type: "project",
+      aliases: ["Example Project"],
+      description: "A project.",
+      metadata: { owner: "Levi" },
+      status: "active",
+      tags: ["ecos"],
+      created_at: "2026-06-05",
+      updated_at: "2026-06-05",
+    };
+    expect(entity.aliases).toEqual(["Example Project"]);
+  });
+
+  it("matches directed entity_links", () => {
+    const link: EntityLink = {
+      id: "l1",
+      from_entity_id: "e1",
+      to_entity_id: "e2",
+      relationship_type: "part_of",
+      notes: null,
+      metadata: {},
+      created_at: "2026-06-05",
+    };
+    expect(link.relationship_type).toBe("part_of");
   });
 });
 

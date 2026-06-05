@@ -27,6 +27,7 @@ export default function RootLayout({
           <a href="/people" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">People</a>
           <a href="/brain" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">BRAIN</a>
           <a href="/artifacts" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">Artifacts</a>
+          <a href="/entities" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">Entities</a>
           <a href="/artifacts/review" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-emerald-800 hover:text-emerald-600 transition-colors">Review</a>
           <a href="/taste" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">Taste</a>
           <a href="/it" className="inline-flex min-h-10 min-w-[40px] items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">IT</a>
