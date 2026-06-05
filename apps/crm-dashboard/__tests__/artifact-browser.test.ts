@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { artifactTags, countArtifactTags } from "@/lib/artifact-browser";
+import {
+  artifactTags,
+  countArtifactTags,
+  formatArtifactTag,
+  sortArtifactTags,
+} from "@/lib/artifact-browser";
 import type { Artifact } from "@/lib/supabase";
 
 const artifact = (id: string, tags?: unknown): Artifact => ({
@@ -20,15 +25,25 @@ describe("artifact browser tag helpers", () => {
     expect(artifactTags(artifact("a", ["boot", 3, "ecos"]))).toEqual(["boot", "ecos"]);
   });
 
-  it("counts exact tags and sorts by count then name", () => {
+  it("prioritizes FIBERR, Filament, and boot before sorting remaining tags by count then name", () => {
     expect(countArtifactTags([
-      artifact("a", ["boot", "ecos"]),
-      artifact("b", ["boot"]),
-      artifact("c", ["alpha"]),
+      artifact("a", ["boot", "ecos", "fiberr"]),
+      artifact("b", ["boot", "ecos", "filament"]),
+      artifact("c", ["ecos", "alpha"]),
     ])).toEqual([
+      ["fiberr", 1],
+      ["filament", 1],
       ["boot", 2],
+      ["ecos", 3],
       ["alpha", 1],
-      ["ecos", 1],
     ]);
+  });
+
+  it("sorts priority tags to the front and formats their canonical labels", () => {
+    expect(sortArtifactTags(["zeta", "boot", "filament", "alpha", "fiberr"]))
+      .toEqual(["fiberr", "filament", "boot", "alpha", "zeta"]);
+    expect(formatArtifactTag("fiberr")).toBe("FIBERR");
+    expect(formatArtifactTag("filament")).toBe("Filament");
+    expect(formatArtifactTag("boot")).toBe("boot");
   });
 });

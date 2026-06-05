@@ -7,6 +7,7 @@ import { CopyButton } from "@/lib/copy-button";
 import { editArtifactBlockAction, updateArtifactGovernanceAction } from "@/app/artifacts/actions";
 import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
 import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
+import { formatArtifactTag, sortArtifactTags } from "@/lib/artifact-browser";
 import { notFound } from "next/navigation";
 
 // jsonb metadata is loosely typed — read fields with guards.
@@ -131,7 +132,7 @@ export default async function ArtifactDetailPage({
   const authorityLevel = str(meta, "authority_level");
   const scope = str(meta, "scope");
   const domain = str(meta, "domain");
-  const tags = strArray(meta, "tags");
+  const tags = sortArtifactTags(strArray(meta, "tags"));
   const migratedFrom = str(meta, "migrated_from") ?? str(meta, "legacy_doc_type");
   const summary = str(meta, "summary");
   const targetRuntime = str(meta, "target_runtime");
@@ -214,7 +215,7 @@ export default async function ArtifactDetailPage({
           {targetRuntime && <span className={chipClass("gray")}>runtime: {targetRuntime}</span>}
           {tags.map((t) => (
             <span key={t} className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">
-              {t}
+              {formatArtifactTag(t)}
             </span>
           ))}
         </div>
@@ -402,13 +403,16 @@ export default async function ArtifactDetailPage({
                           defaultValue={b.content}
                           className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300"
                         />
-                        <input
-                          name="reason"
-                          required
-                          placeholder="Describe the human edit"
-                          className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                        />
+                        <label className="block text-sm text-gray-700">
+                          <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Change note (optional)</span>
+                          <input
+                            name="reason"
+                            placeholder="Describe the human edit"
+                            className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                          />
+                        </label>
                         <button
+                          type="submit"
                           disabled={!humanAuthority.configured}
                           className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
