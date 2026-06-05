@@ -3,7 +3,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path = public, extensions, pg_temp;
 
-SELECT plan(16);
+SELECT plan(19);
 
 SELECT create_artifact_v2(
   'artifact_v3_gate_test',
@@ -259,6 +259,57 @@ SELECT is(
   'approved patch becomes current only through the human authority path'
 )
 FROM artifact_v3_test_state;
+
+UPDATE artifact_v3_test_state state
+SET current_version = a.current_version,
+    content_hash = b.content_hash
+FROM artifacts a
+JOIN artifact_blocks b ON b.artifact_id = a.id AND b.path = '/body'
+WHERE a.id = state.artifact_id;
+
+SET LOCAL ROLE authenticated;
+SELECT set_config(
+  'request.jwt.claims',
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+
+SELECT is(
+  apply_artifact_human_patch_tx(
+    'artifact_v3_gate_test',
+    current_version,
+    jsonb_build_array(jsonb_build_object(
+      'op', 'replace_block',
+      'path', '/body',
+      'expected_hash', content_hash,
+      'content', 'direct human edit'
+    )),
+    'direct human edit gate test',
+    '{"surface":"pgTAP","action":"direct_block_edit"}'::jsonb
+  )->>'new_version',
+  '3',
+  'authenticated allowlisted human can apply a direct block edit'
+)
+FROM artifact_v3_test_state;
+
+RESET ROLE;
+
+SELECT is(
+  (SELECT content FROM artifact_blocks WHERE artifact_id = (SELECT artifact_id FROM artifact_v3_test_state) AND path = '/body'),
+  'direct human edit',
+  'direct human edit becomes current'
+);
+
+SELECT is(
+  (
+    SELECT actor_type || '|' || actor_id || '|' || (source_refs->>'action')
+    FROM artifact_revisions
+    WHERE artifact_id = (SELECT artifact_id FROM artifact_v3_test_state)
+      AND version = 3
+  ),
+  'human|test-reviewer|direct_block_edit',
+  'direct human edit revision records database-derived identity and source'
+);
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -1,4 +1,5 @@
 type Tone = "gray" | "amber" | "red" | "emerald" | "blue" | "indigo" | "purple";
+type ActionFeedbackResult = "success" | "warning" | "error" | "info";
 
 const TONE_CLASSES: Record<Tone, string> = {
   gray: "bg-gray-100 text-gray-700",
@@ -24,6 +25,43 @@ export type ReviewField = {
 
 export function chipClass(tone: Tone = "gray"): string {
   return `px-2 py-0.5 rounded-full text-xs font-medium [overflow-wrap:anywhere] ${TONE_CLASSES[tone]}`;
+}
+
+export function ActionFeedbackBanner({
+  result,
+  label,
+  message,
+  clearHref,
+}: {
+  result: ActionFeedbackResult;
+  label: string;
+  message: string;
+  clearHref: string;
+}) {
+  const classes: Record<ActionFeedbackResult, string> = {
+    success: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    warning: "border-amber-200 bg-amber-50 text-amber-950",
+    error: "border-red-200 bg-red-50 text-red-950",
+    info: "border-blue-200 bg-blue-50 text-blue-950",
+  };
+
+  return (
+    <section
+      id="action-feedback"
+      role={result === "error" ? "alert" : "status"}
+      className={`scroll-mt-4 rounded-lg border p-4 mb-5 ${classes[result]}`}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+          <p className="text-sm mt-1">{message}</p>
+        </div>
+        <a href={clearHref} className="inline-flex min-h-10 items-center text-xs font-medium opacity-70 hover:opacity-100">
+          Dismiss
+        </a>
+      </div>
+    </section>
+  );
 }
 
 export function ReviewHeader({

@@ -2,11 +2,21 @@ import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase-server";
 import type { Artifact, ArtifactBlock, ArtifactChangeProposal, ArtifactReviewEvent } from "@/lib/supabase";
 import { artifactOpLabel, currentBlockForOp, proposedContentForOp } from "@/lib/artifact-review";
-import { chipClass, ReviewHeader, type ReviewChip } from "@/lib/review-ui";
+import { ActionFeedbackBanner, chipClass, ReviewHeader, type ReviewChip } from "@/lib/review-ui";
 import { reviewArtifactProposalAction } from "@/app/artifacts/actions";
+import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
+import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
 
-export default async function ArtifactProposalDetail({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default async function ArtifactProposalDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ action_result?: string; action_label?: string; action_message?: string }>;
+}) {
+  const [{ id }, actionParams] = await Promise.all([params, searchParams]);
+  const actionFeedback = readArtifactActionFeedback(actionParams);
+  const humanAuthority = getHumanAuthorityConfiguration();
   const { data: proposalRow } = await supabase.from("artifact_change_proposals")
     .select("*").eq("id", id).maybeSingle();
   if (!proposalRow) notFound();
@@ -53,6 +63,17 @@ export default async function ArtifactProposalDetail({ params }: { params: Promi
           { label: "Proposal ID", value: proposal.id, mono: true },
         ]}
       />
+
+      {actionFeedback && <ActionFeedbackBanner {...actionFeedback} clearHref={`/artifacts/review/${id}`} />}
+
+      {isOpen && !humanAuthority.configured && (
+        <section role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
+          <p className="text-xs font-semibold uppercase tracking-wide">Human review unavailable</p>
+          <p className="text-sm mt-1">
+            This runtime is missing: <span className="font-mono text-xs">{humanAuthority.missing.join(", ")}</span>.
+          </p>
+        </section>
+      )}
 
       {proposal.review_reason && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-5">
@@ -105,16 +126,16 @@ export default async function ArtifactProposalDetail({ params }: { params: Promi
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
             />
             <div className="flex flex-wrap gap-2">
-              <button name="action" value="approve" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+              <button disabled={!humanAuthority.configured} name="action" value="approve" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
                 Approve
               </button>
-              <button name="action" value="request_revision" className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-800 hover:bg-blue-100">
+              <button disabled={!humanAuthority.configured} name="action" value="request_revision" className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
                 Request revision
               </button>
-              <button name="action" value="reject" className="min-h-10 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-800 hover:bg-red-100">
+              <button disabled={!humanAuthority.configured} name="action" value="reject" className="min-h-10 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
                 Reject
               </button>
-              <button name="action" value="supersede" className="min-h-10 rounded-lg border border-gray-200 bg-gray-50 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100">
+              <button disabled={!humanAuthority.configured} name="action" value="supersede" className="min-h-10 rounded-lg border border-gray-200 bg-gray-50 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400">
                 Supersede
               </button>
             </div>
@@ -137,7 +158,7 @@ export default async function ArtifactProposalDetail({ params }: { params: Promi
                 placeholder="Describe the human edit"
                 className="min-h-10 w-full rounded-lg border border-gray-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
-              <button className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700">
+              <button disabled={!humanAuthority.configured} className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
                 Edit and approve
               </button>
             </form>

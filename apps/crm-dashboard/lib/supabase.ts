@@ -1,5 +1,6 @@
 export type Contact = {
   id: string;
+  entity_id: string | null;
   name: string;
   company: string | null;
   title: string | null;
@@ -37,6 +38,29 @@ export type Opportunity = {
   value: number | null;
   close_date: string | null;
   notes: string | null;
+  created_at: string;
+};
+
+export type Entity = {
+  id: string;
+  name: string;
+  entity_type: string;
+  aliases: string[];
+  description: string | null;
+  metadata: Record<string, unknown>;
+  status: "active" | "archived";
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type EntityLink = {
+  id: string;
+  from_entity_id: string;
+  to_entity_id: string;
+  relationship_type: string;
+  notes: string | null;
+  metadata: Record<string, unknown>;
   created_at: string;
 };
 
