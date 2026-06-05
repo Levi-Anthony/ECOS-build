@@ -3,34 +3,35 @@ import { DOMAIN_COLORS, DOMAIN_LABELS, STATUS_COLORS, STATUS_LABELS, STAGE_COLOR
 import type { Contact, Interaction, Opportunity, ThoughtLink, PersonObservation, PersonSnapshot } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 
-export default async function ContactDetailPage({ params }: { params: { id: string } }) {
+export default async function ContactDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const [contactRes, interactionsRes, oppsRes, snapshotRes, observationsRes] = await Promise.all([
     supabase
       .from("professional_contacts")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", id)
       .single(),
     supabase
       .from("contact_interactions")
       .select("id, interaction_type, summary, follow_up_notes, follow_up_needed, occurred_at")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .order("occurred_at", { ascending: false })
       .limit(30),
     supabase
       .from("opportunities")
       .select("id, title, stage, value, close_date, notes")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .order("created_at", { ascending: false }),
     supabase
       .from("person_snapshots")
       .select("snapshot_content, domains_covered, compiled_by, version, created_at")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .eq("is_current", true)
       .maybeSingle(),
     supabase
       .from("person_observations")
       .select("id, observation_type, content, confidence, domain_context, observed_at, linked_thought_id")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .order("observed_at", { ascending: false })
       .limit(50),
   ]);

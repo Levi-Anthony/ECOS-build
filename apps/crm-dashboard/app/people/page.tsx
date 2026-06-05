@@ -21,9 +21,9 @@ const STATUS_LABEL: Record<IntelStatus, string> = {
 export default async function PeoplePage({
   searchParams,
 }: {
-  searchParams: { filter?: string };
+  searchParams: Promise<{ filter?: string }>;
 }) {
-  const filter = searchParams?.filter ?? "all";
+  const { filter = "all" } = await searchParams;
 
   const [contactsRes, obsRes, snapRes] = await Promise.all([
     supabase

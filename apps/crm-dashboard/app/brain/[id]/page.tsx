@@ -4,11 +4,12 @@ import { relativeAge } from "@/lib/logic";
 import { ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
 import { notFound } from "next/navigation";
 
-export default async function ThoughtDetailPage({ params }: { params: { id: string } }) {
+export default async function ThoughtDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const { data, error } = await supabase
     .from("thoughts")
     .select("id, content, original_content, created_at, status, retrieval_count, source_id, metadata")
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
 
   if (error || !data) notFound();

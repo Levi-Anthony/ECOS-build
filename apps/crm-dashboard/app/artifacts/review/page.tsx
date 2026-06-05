@@ -14,9 +14,9 @@ const STATUS_TONES: Record<string, "amber" | "blue" | "emerald" | "red" | "gray"
 export default async function ArtifactReviewInbox({
   searchParams,
 }: {
-  searchParams: { status?: string };
+  searchParams: Promise<{ status?: string }>;
 }) {
-  const status = searchParams?.status ?? "pending";
+  const { status = "pending" } = await searchParams;
   let query = supabase.from("artifact_change_proposals")
     .select("*")
     .order("created_at", { ascending: false })

@@ -10,9 +10,9 @@ const STATUS_COLORS: Record<string, string> = {
 export default async function TastePage({
   searchParams,
 }: {
-  searchParams: { domain?: string; status?: string };
+  searchParams: Promise<{ domain?: string; status?: string }>;
 }) {
-  const { domain, status } = searchParams ?? {};
+  const { domain, status } = await searchParams;
 
   let query = supabase
     .from("taste_preferences")

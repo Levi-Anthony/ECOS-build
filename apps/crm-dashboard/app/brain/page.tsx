@@ -51,9 +51,9 @@ const STATUS_COLORS: Record<string, string> = {
 export default async function BrainPage({
   searchParams,
 }: {
-  searchParams: { domain?: string; type?: string; horizon?: string; signal_type?: string; q?: string; sort?: string };
+  searchParams: Promise<{ domain?: string; type?: string; horizon?: string; signal_type?: string; q?: string; sort?: string }>;
 }) {
-  const { domain, type, horizon, signal_type, q, sort } = searchParams ?? {};
+  const { domain, type, horizon, signal_type, q, sort } = await searchParams;
 
   let query = supabase
     .from("thoughts")

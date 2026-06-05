@@ -5,9 +5,10 @@ import { artifactOpLabel, currentBlockForOp, proposedContentForOp } from "@/lib/
 import { chipClass, ReviewHeader, type ReviewChip } from "@/lib/review-ui";
 import { reviewArtifactProposalAction } from "@/app/artifacts/actions";
 
-export default async function ArtifactProposalDetail({ params }: { params: { id: string } }) {
+export default async function ArtifactProposalDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const { data: proposalRow } = await supabase.from("artifact_change_proposals")
-    .select("*").eq("id", params.id).maybeSingle();
+    .select("*").eq("id", id).maybeSingle();
   if (!proposalRow) notFound();
   const proposal = proposalRow as ArtifactChangeProposal;
 

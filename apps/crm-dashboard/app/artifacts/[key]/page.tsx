@@ -32,8 +32,9 @@ const buildFullDoc = (title: string, blocks: ArtifactBlock[]): string => {
   return [`# ${title}`, ...sections].join("\n\n");
 };
 
-export default async function ArtifactDetailPage({ params }: { params: { key: string } }) {
-  const key = decodeURIComponent(params.key);
+export default async function ArtifactDetailPage({ params }: { params: Promise<{ key: string }> }) {
+  const { key: encodedKey } = await params;
+  const key = decodeURIComponent(encodedKey);
 
   const { data: artifactRow, error } = await supabase
     .from("artifacts")
@@ -79,6 +80,29 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
   const revisions = (revisionRows ?? []) as ArtifactRevision[];
   const links = (linkRows ?? []) as ArtifactLink[];
   const openProposals = (proposalRows ?? []) as Array<{ id: string; status: string; summary: string; created_at: string }>;
+
+  const idsByType = (linkedType: ArtifactLink["linked_type"]) =>
+    links.filter((link) => link.linked_type === linkedType).map((link) => link.linked_id);
+  const [thoughtRows, contactRows, entityRows, opportunityRows] = await Promise.all([
+    idsByType("thought").length
+      ? supabase.from("thoughts").select("id, content").in("id", idsByType("thought"))
+      : Promise.resolve({ data: [] }),
+    idsByType("contact").length
+      ? supabase.from("professional_contacts").select("id, name").in("id", idsByType("contact"))
+      : Promise.resolve({ data: [] }),
+    idsByType("entity").length
+      ? supabase.from("entities").select("id, name, entity_type").in("id", idsByType("entity"))
+      : Promise.resolve({ data: [] }),
+    idsByType("opportunity").length
+      ? supabase.from("opportunities").select("id, title").in("id", idsByType("opportunity"))
+      : Promise.resolve({ data: [] }),
+  ]);
+  const linkedLabels = new Map<string, string>([
+    ...(thoughtRows.data ?? []).map((row) => [row.id, row.content.length > 140 ? `${row.content.slice(0, 140)}...` : row.content] as const),
+    ...(contactRows.data ?? []).map((row) => [row.id, row.name] as const),
+    ...(entityRows.data ?? []).map((row) => [row.id, `${row.name} (${row.entity_type})`] as const),
+    ...(opportunityRows.data ?? []).map((row) => [row.id, row.title] as const),
+  ]);
 
   const authorityLevel = str(meta, "authority_level");
   const scope = str(meta, "scope");
@@ -367,7 +391,8 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
           </h2>
           <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 mb-8">
             {links.map((link) => {
-              const href = linkedHref(link);
+              const linkedLabel = linkedLabels.get(link.linked_id);
+              const href = linkedLabel ? linkedHref(link) : null;
               const body = (
                 <div>
                   <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -376,6 +401,11 @@ export default async function ArtifactDetailPage({ params }: { params: { key: st
                     <span className="text-xs text-gray-400">{new Date(link.created_at).toLocaleDateString()}</span>
                   </div>
                   <p className="font-mono text-xs text-gray-600 break-all">{link.linked_id}</p>
+                  {linkedLabel ? (
+                    <p className="text-sm font-medium text-gray-800 mt-1">{linkedLabel}</p>
+                  ) : (
+                    <p className="text-xs font-medium text-red-700 mt-1">Target record not found</p>
+                  )}
                   {link.note && <p className="text-sm text-gray-700 mt-1">{link.note}</p>}
                 </div>
               );

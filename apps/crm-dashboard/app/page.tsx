@@ -7,9 +7,9 @@ import { PageHeader, StatGrid, StatCard } from "@/lib/page-ui";
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: { domain?: string };
+  searchParams: Promise<{ domain?: string }>;
 }) {
-  const domain = searchParams?.domain;
+  const { domain } = await searchParams;
 
   let query = supabase
     .from("professional_contacts")

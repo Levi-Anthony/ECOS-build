@@ -17,23 +17,24 @@ const BILLING_STATUS_COLORS: Record<string, string> = {
   paid: "bg-emerald-100 text-emerald-800",
 };
 
-export default async function ITClientPage({ params }: { params: { id: string } }) {
+export default async function ITClientPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const [contactRes, logsRes, billingRes] = await Promise.all([
     supabase
       .from("professional_contacts")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", id)
       .single(),
     supabase
       .from("it_service_logs")
       .select("*")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .order("service_date", { ascending: false })
       .limit(30),
     supabase
       .from("it_billing_entries")
       .select("*")
-      .eq("contact_id", params.id)
+      .eq("contact_id", id)
       .order("created_at", { ascending: false }),
   ]);
 

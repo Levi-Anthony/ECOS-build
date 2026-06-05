@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Artifact } from "@/lib/supabase";
 import { ActiveFilterSummary, EmptyReviewState, chipClass, type ReviewChip } from "@/lib/review-ui";
+import { artifactTags, countArtifactTags } from "@/lib/artifact-browser";
 import type { ReactNode } from "react";
 
 const KIND_COLORS: Record<string, string> = {
@@ -85,9 +86,9 @@ const formatAuthority = (authorityLevel: string): string =>
 export default async function ArtifactsPage({
   searchParams,
 }: {
-  searchParams: { kind?: string; status?: string; authority?: string; review?: string; q?: string; sort?: string };
+  searchParams: Promise<{ kind?: string; status?: string; authority?: string; review?: string; tag?: string; q?: string; sort?: string }>;
 }) {
-  const { kind, status, authority, review, q, sort } = searchParams ?? {};
+  const { kind, status, authority, review, tag, q, sort } = await searchParams;
   const search = q?.trim();
 
   const { data: artifacts, error } = await supabase
@@ -107,8 +108,10 @@ export default async function ArtifactsPage({
       if (status && artifact.status !== status) return false;
       if (review && artifact.review_policy !== review) return false;
       if (authority && authorityLevel !== authority) return false;
+      if (tag && !artifactTags(artifact).includes(tag)) return false;
       if (!normalizedSearch) return true;
-      return [artifact.title, artifact.key, summary].some((value) => value.toLowerCase().includes(normalizedSearch));
+      return [artifact.title, artifact.key, summary, ...artifactTags(artifact)]
+        .some((value) => value.toLowerCase().includes(normalizedSearch));
     })
     .sort((a, b) => {
       if (sort === "title") return a.title.localeCompare(b.title);
@@ -124,6 +127,7 @@ export default async function ArtifactsPage({
   const statuses = countBy(allRows, (artifact) => artifact.status).map(([value]) => value);
   const authorities = countBy(allRows, (artifact) => str(artifact.metadata, "authority_level")).map(([value]) => value);
   const reviewPolicies = countBy(allRows, (artifact) => artifact.review_policy).map(([value]) => value);
+  const tags = countArtifactTags(allRows);
   const resultKindCounts = countBy(rows, (artifact) => artifact.kind);
   const resultStatusCounts = countBy(rows, (artifact) => artifact.status);
   const resultAuthorityCounts = countBy(rows, (artifact) => str(artifact.metadata, "authority_level"));
@@ -133,9 +137,9 @@ export default async function ArtifactsPage({
     ["policy", "approved_instruction"].includes(str(artifact.metadata, "authority_level") ?? "")
   ).length;
 
-  const buildUrl = (overrides: { kind?: string; status?: string; authority?: string; review?: string; q?: string; sort?: string }) => {
+  const buildUrl = (overrides: { kind?: string; status?: string; authority?: string; review?: string; tag?: string; q?: string; sort?: string }) => {
     const params = new URLSearchParams();
-    const merged = { kind, status, authority, review, q: search, sort, ...overrides };
+    const merged = { kind, status, authority, review, tag, q: search, sort, ...overrides };
     for (const [k, v] of Object.entries(merged)) {
       if (v) params.set(k, v);
     }
@@ -148,6 +152,7 @@ export default async function ArtifactsPage({
     status ? { label: `status: ${status}`, tone: status === "active" ? "emerald" : "gray" } : null,
     authority ? { label: `authority: ${formatAuthority(authority)}`, tone: "indigo" } : null,
     review ? { label: `review: ${review}`, tone: "emerald" } : null,
+    tag ? { label: `tag: ${tag}`, tone: "blue" } : null,
     search ? { label: `search: ${search}`, tone: "blue" } : null,
     sort === "title" ? { label: "sort: title", tone: "gray" } : null,
     sort === "authority" ? { label: "sort: authority", tone: "gray" } : null,
@@ -247,6 +252,7 @@ export default async function ArtifactsPage({
         {status && <input type="hidden" name="status" value={status} />}
         {authority && <input type="hidden" name="authority" value={authority} />}
         {review && <input type="hidden" name="review" value={review} />}
+        {tag && <input type="hidden" name="tag" value={tag} />}
         {sort && <input type="hidden" name="sort" value={sort} />}
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -295,6 +301,12 @@ export default async function ArtifactsPage({
             <FilterPill key={policy} label={policy.replaceAll("_", " ")} href={buildUrl({ review: policy })} active={review === policy} />
           ))}
         </FilterGroup>
+        <FilterGroup label="Tag">
+          <FilterPill label="All tags" href={buildUrl({ tag: undefined })} active={!tag} />
+          {tags.slice(0, 24).map(([value, count]) => (
+            <FilterPill key={value} label={`${value} (${count})`} href={buildUrl({ tag: value })} active={tag === value} />
+          ))}
+        </FilterGroup>
       </div>
 
       <ActiveFilterSummary filters={activeFilters} clearHref="/artifacts" resultCount={rows.length} />
@@ -310,6 +322,7 @@ export default async function ArtifactsPage({
           const summary = str(meta, "summary");
           const authorityLevel = str(meta, "authority_level");
           const scope = str(meta, "scope");
+          const tags = artifactTags(a);
           return (
             <a
               key={a.id}
@@ -357,6 +370,13 @@ export default async function ArtifactsPage({
                     <p className="text-sm text-gray-700 leading-relaxed mt-1.5">
                       {summary.length > 200 ? summary.slice(0, 200) + "…" : summary}
                     </p>
+                  )}
+                  {tags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {tags.slice(0, 8).map((artifactTag) => (
+                        <span key={artifactTag} className={chipClass("blue")}>{artifactTag}</span>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <div className="text-left sm:text-right flex-shrink-0 text-xs text-gray-400">

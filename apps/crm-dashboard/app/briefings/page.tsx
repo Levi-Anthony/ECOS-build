@@ -38,9 +38,9 @@ const BRIEFING_TYPES = ["morning", "checkin", "evening", "weekly_review", "pre_m
 export default async function BriefingsPage({
   searchParams,
 }: {
-  searchParams: { type?: string };
+  searchParams: Promise<{ type?: string }>;
 }) {
-  const activeType = searchParams?.type;
+  const { type: activeType } = await searchParams;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 14);
 

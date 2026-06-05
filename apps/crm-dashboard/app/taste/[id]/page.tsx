@@ -15,11 +15,12 @@ const CHANGE_COLORS: Record<string, string> = {
   archived: "bg-gray-100 text-gray-600",
 };
 
-export default async function TasteDetailPage({ params }: { params: { id: string } }) {
+export default async function TasteDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const { data: prefData, error: prefError } = await supabase
     .from("taste_preferences")
     .select("*")
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
 
   if (prefError || !prefData) notFound();
@@ -28,7 +29,7 @@ export default async function TasteDetailPage({ params }: { params: { id: string
   const { data: evolutionData } = await supabase
     .from("taste_evolution")
     .select("*")
-    .eq("taste_id", params.id)
+    .eq("taste_id", id)
     .order("created_at", { ascending: false });
   const evolution = (evolutionData ?? []) as TasteEvolution[];
 
