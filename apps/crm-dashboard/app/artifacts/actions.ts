@@ -5,7 +5,11 @@ import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase-server";
 import { reindexArtifactPaths } from "@/lib/ecb-mcp";
 import { getHumanAuthorityClient } from "@/lib/human-authority";
-import { artifactBlockContentHash, normalizeArtifactBlockContent } from "@/lib/artifact-editor";
+import {
+  artifactBlockContentHash,
+  artifactHumanEditSummary,
+  normalizeArtifactBlockContent,
+} from "@/lib/artifact-editor";
 import {
   acceptedWriteFeedback,
   artifactActionErrorMessage,
@@ -47,7 +51,7 @@ export async function editArtifactBlockAction(formData: FormData) {
     const rawContent = formData.get("content");
     if (typeof rawContent !== "string") throw new Error("Missing content");
     const content = normalizeArtifactBlockContent(rawContent);
-    const reason = required(formData, "reason");
+    const reason = artifactHumanEditSummary(formData.get("reason"));
     const baseVersion = parseVersion(formData);
 
     const submittedHash = artifactBlockContentHash(content);

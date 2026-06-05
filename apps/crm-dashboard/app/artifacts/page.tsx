@@ -1,7 +1,12 @@
 import { supabase } from "@/lib/supabase-server";
 import type { Artifact } from "@/lib/supabase";
 import { ActiveFilterSummary, EmptyReviewState, chipClass, type ReviewChip } from "@/lib/review-ui";
-import { artifactTags, countArtifactTags } from "@/lib/artifact-browser";
+import {
+  artifactTags,
+  countArtifactTags,
+  formatArtifactTag,
+  sortArtifactTags,
+} from "@/lib/artifact-browser";
 import type { ReactNode } from "react";
 
 const KIND_COLORS: Record<string, string> = {
@@ -152,7 +157,7 @@ export default async function ArtifactsPage({
     status ? { label: `status: ${status}`, tone: status === "active" ? "emerald" : "gray" } : null,
     authority ? { label: `authority: ${formatAuthority(authority)}`, tone: "indigo" } : null,
     review ? { label: `review: ${review}`, tone: "emerald" } : null,
-    tag ? { label: `tag: ${tag}`, tone: "blue" } : null,
+    tag ? { label: `tag: ${formatArtifactTag(tag)}`, tone: "blue" } : null,
     search ? { label: `search: ${search}`, tone: "blue" } : null,
     sort === "title" ? { label: "sort: title", tone: "gray" } : null,
     sort === "authority" ? { label: "sort: authority", tone: "gray" } : null,
@@ -304,7 +309,7 @@ export default async function ArtifactsPage({
         <FilterGroup label="Tag">
           <FilterPill label="All tags" href={buildUrl({ tag: undefined })} active={!tag} />
           {tags.slice(0, 24).map(([value, count]) => (
-            <FilterPill key={value} label={`${value} (${count})`} href={buildUrl({ tag: value })} active={tag === value} />
+            <FilterPill key={value} label={`${formatArtifactTag(value)} (${count})`} href={buildUrl({ tag: value })} active={tag === value} />
           ))}
         </FilterGroup>
       </div>
@@ -322,7 +327,7 @@ export default async function ArtifactsPage({
           const summary = str(meta, "summary");
           const authorityLevel = str(meta, "authority_level");
           const scope = str(meta, "scope");
-          const tags = artifactTags(a);
+          const tags = sortArtifactTags(artifactTags(a));
           return (
             <a
               key={a.id}
@@ -374,7 +379,7 @@ export default async function ArtifactsPage({
                   {tags.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {tags.slice(0, 8).map((artifactTag) => (
-                        <span key={artifactTag} className={chipClass("blue")}>{artifactTag}</span>
+                        <span key={artifactTag} className={chipClass("blue")}>{formatArtifactTag(artifactTag)}</span>
                       ))}
                     </div>
                   )}
