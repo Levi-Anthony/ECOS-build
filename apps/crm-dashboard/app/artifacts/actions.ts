@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase-server";
 import { reindexArtifactPaths } from "@/lib/ecb-mcp";
-import { getHumanAuthorityClient } from "@/lib/human-authority";
 import {
   artifactBlockContentHash,
   artifactHumanEditSummary,
@@ -62,13 +61,12 @@ export async function editArtifactBlockAction(formData: FormData) {
         message: "No content changed, so no new version was created.",
       };
     } else {
-      const human = await getHumanAuthorityClient();
-      const { data, error } = await human.rpc("apply_artifact_human_patch_tx", {
+      const { data, error } = await supabase.rpc("apply_artifact_dashboard_patch_tx", {
         p_key: key,
         p_base_version: baseVersion,
         p_ops: [{ op: "replace_block", path, expected_hash: expectedHash, content }],
         p_summary: reason,
-        p_source_refs: { surface: "crm-dashboard", action: "direct_block_edit" },
+        p_source_refs: { surface: "crm-dashboard", action: "direct_block_edit", gate: "dashboard_basic_auth" },
       });
       if (error) throw new Error(error.message);
       const result = data as { new_version?: number; changed_paths?: string[] };
@@ -106,13 +104,12 @@ export async function updateArtifactGovernanceAction(formData: FormData) {
         message: "No governance fields changed, so no new version was created.",
       };
     } else {
-      const human = await getHumanAuthorityClient();
-      const { data, error } = await human.rpc("apply_artifact_human_patch_tx", {
+      const { data, error } = await supabase.rpc("apply_artifact_dashboard_patch_tx", {
         p_key: key,
         p_base_version: baseVersion,
         p_ops: ops,
         p_summary: reason,
-        p_source_refs: { surface: "crm-dashboard", action: "governance_update" },
+        p_source_refs: { surface: "crm-dashboard", action: "governance_update", gate: "dashboard_basic_auth" },
       });
       if (error) throw new Error(error.message);
       const result = data as { new_version?: number; changed_paths?: string[] };
@@ -140,8 +137,7 @@ export async function reviewArtifactProposalAction(formData: FormData) {
       replacementOps = parsed as ArtifactPatchOp[];
     }
 
-    const human = await getHumanAuthorityClient();
-    const { data, error } = await human.rpc("review_artifact_change_tx", {
+    const { data, error } = await supabase.rpc("review_artifact_dashboard_change_tx", {
       p_proposal_id: proposalId,
       p_action: action,
       p_reason: reason,
