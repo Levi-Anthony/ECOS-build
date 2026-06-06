@@ -107,4 +107,7 @@ revoke execute on function public.review_artifact_dashboard_change_tx(uuid, text
 grant execute on function public.apply_artifact_dashboard_patch_tx(text, integer, jsonb, text, jsonb) to service_role;
 grant execute on function public.review_artifact_dashboard_change_tx(uuid, text, text, jsonb) to service_role;
 
+notify pgrst, 'reload schema';
+notify pgrst, 'reload config';
+
 commit;
