@@ -1,9 +1,14 @@
 // Taste tools — taste_preferences extension table with audit trail.
 // capture_taste_preference dual-writes (taste_preferences row + thoughts mirror).
 // update_taste_preference logs every change to taste_evolution.
+//
+// Contract convention: see ./CONVENTION.md.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import { TastePreferenceSchema, listOf, writeResult } from "../lib/schemas.ts";
 
 export const register: RegisterFn = (registrar, supabase, helpers) => {
   const { ECOS_USER_ID, getEmbedding } = helpers;
@@ -19,7 +24,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   {
     title: "Capture Taste Preference",
     description:
-      "Capture a TASTE preference as a structured taste_preferences row, with a thoughts mirror for semantic search. Use after the Taste Harvest Protocol surfaces a candidate and Levi approves it. The Prompt-4 fields are: Preference Name, Domain, Reject (specific and observable), Want (specific and observable), Type (free-form slash-format like 'Session discipline / Process').",
+      "Capture a TASTE preference as a structured taste_preferences row plus a thoughts mirror for semantic search.\n" +
+      "Use when: the Taste Harvest Protocol surfaces a candidate and Levi approves it. Not for: editing an existing preference — use `update_taste_preference`.\n" +
+      "Side effects: inserts a taste_preferences row, embeds + inserts a thoughts mirror, then back-links them (transactional across tables).\n" +
+      "Prompt-4 fields: Preference Name, Domain, Reject (specific/observable), Want (specific/observable), Type (free-form slash-format).\n" +
+      "Returns: { ok, id (taste id), thought_id, preference_name, domain }.",
     inputSchema: {
       preference_name: z.string().describe("Short name for the preference"),
       domain: z.string().describe("Where this preference applies"),
@@ -29,6 +38,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       contact_id: z.string().uuid().optional().describe("Optionally scope this preference to a specific contact"),
       source: z.string().optional().describe("Where this signal came from (defaults to 'mcp:capture_taste_preference')"),
     },
+    outputSchema: writeResult({
+      thought_id: z.string(),
+      preference_name: z.string(),
+      domain: z.string(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ preference_name, domain, reject, want, type_label, contact_id, source }) => {
     try {
@@ -51,7 +66,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .select("id")
         .single();
       if (tasteErr || !tasteRow) {
-        return { content: [{ type: "text" as const, text: `Failed to insert taste_preferences row: ${tasteErr?.message ?? "no row returned"}` }], isError: true };
+        return errorResult(`Failed to insert taste_preferences row: ${tasteErr?.message ?? "no row returned"}`);
       }
 
       const embedding = await getEmbedding(content);
@@ -73,7 +88,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .select("id")
         .single();
       if (thoughtErr || !thoughtRow) {
-        return { content: [{ type: "text" as const, text: `taste_preferences row inserted (${tasteRow.id}) but thoughts mirror failed: ${thoughtErr?.message ?? "no row returned"}` }], isError: true };
+        return errorResult(`taste_preferences row inserted (${tasteRow.id}) but thoughts mirror failed: ${thoughtErr?.message ?? "no row returned"}`);
       }
 
       const { error: linkErr } = await supabase
@@ -81,17 +96,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .update({ thought_id: thoughtRow.id })
         .eq("id", tasteRow.id);
       if (linkErr) {
-        return { content: [{ type: "text" as const, text: `Both rows created (taste=${tasteRow.id}, thought=${thoughtRow.id}) but back-link failed: ${linkErr.message}` }], isError: true };
+        return errorResult(`Both rows created (taste=${tasteRow.id}, thought=${thoughtRow.id}) but back-link failed: ${linkErr.message}`);
       }
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Captured taste preference ${tasteRow.id} ↔ thought ${thoughtRow.id}\nName: ${preference_name}\nDomain: ${domain}\nType: ${type_label}`,
-        }],
-      };
+      return structuredResult(
+        { ok: true, id: tasteRow.id, thought_id: thoughtRow.id, preference_name, domain },
+        `Captured taste preference ${tasteRow.id} ↔ thought ${thoughtRow.id}\nName: ${preference_name}\nDomain: ${domain}\nType: ${type_label}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   },
 );
@@ -101,7 +114,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   {
     title: "Update Taste Preference",
     description:
-      "Update a taste_preferences row. Logs the change to taste_evolution as an audit row (taste_id, change_type, old_value, new_value, reason). Use change_type 'refined' for content changes, 'archived' to retire, 'upgraded'/'downgraded' for status shifts.",
+      "Update a taste_preferences row and log the change to taste_evolution as an audit row.\n" +
+      "Use when: refining/retiring/re-rating a preference. Not for: creating one — use `capture_taste_preference`. change_type: 'refined' for content, 'archived' to retire, 'upgraded'/'downgraded' for status shifts.\n" +
+      "Side effects: appends a taste_evolution audit row, then updates the taste_preferences row (transactional).\n" +
+      "Returns: { ok, id, change_type }.",
     inputSchema: {
       id: z.string().uuid(),
       changes: z.object({
@@ -118,6 +134,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       change_type: z.enum(["upgraded", "downgraded", "refined", "archived"]),
       reason: z.string().describe("Why this change is being made"),
     },
+    outputSchema: writeResult({
+      change_type: z.string(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ id, changes, change_type, reason }) => {
     try {
@@ -127,7 +147,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .eq("id", id)
         .single();
       if (fetchErr || !existing) {
-        return { content: [{ type: "text" as const, text: `Not found: ${fetchErr?.message ?? "no row"}` }], isError: true };
+        return errorResult(`Not found: ${fetchErr?.message ?? "no row"}`, "NOT_FOUND");
       }
 
       const newValue = { ...existing, ...changes };
@@ -141,7 +161,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         applied_at: new Date().toISOString(),
       });
       if (evoErr) {
-        return { content: [{ type: "text" as const, text: `Failed to log evolution row: ${evoErr.message}` }], isError: true };
+        return errorResult(`Failed to log evolution row: ${evoErr.message}`);
       }
 
       const { error: updateErr } = await supabase
@@ -149,12 +169,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .update(changes)
         .eq("id", id);
       if (updateErr) {
-        return { content: [{ type: "text" as const, text: `Evolution logged but update failed: ${updateErr.message}` }], isError: true };
+        return errorResult(`Evolution logged but update failed: ${updateErr.message}`);
       }
 
-      return { content: [{ type: "text" as const, text: `Updated taste preference ${id} (${change_type}); audit row logged.` }] };
+      return structuredResult(
+        { ok: true, id, change_type },
+        `Updated taste preference ${id} (${change_type}); audit row logged.`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   },
 );
@@ -164,12 +187,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   {
     title: "List Taste Preferences",
     description:
-      "List taste preferences with optional filters. Returns active preferences first by default, sorted by invocation_count DESC then most recent. Use this to retrieve the operative taste profile before sessions or to find candidates for refinement.",
+      "List taste preferences (active first, then by invocation_count DESC, then most recent), with optional filters.\n" +
+      "Use when: retrieving the operative taste profile before a session or finding refinement candidates. Not for: capturing a new one — use `capture_taste_preference`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { items, count } of taste preferences.",
     inputSchema: {
       domain: z.string().optional().describe("Filter by domain"),
       status: z.enum(["active", "archived", "superseded"]).optional().describe("Filter by status (defaults to all)"),
       limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)"),
     },
+    outputSchema: listOf(TastePreferenceSchema),
+    annotations: READ_ONLY,
   },
   async ({ domain, status, limit }) => {
     try {
@@ -184,8 +212,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       if (status) q = q.eq("status", status);
 
       const { data, error } = await q;
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: "No taste preferences found." }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      if (!data?.length) return structuredResult({ items: [], count: 0 }, "No taste preferences found.");
 
       const lines: string[] = [`${data.length} taste preference(s):\n`];
       for (const row of data as Array<{ id: string; preference_name: string | null; domain: string | null; type_label: string | null; status: string; invocation_count: number; reject: string | null; want: string | null; evidence: string | null; confidence: string | null; source: string | null }>) {
@@ -195,9 +223,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         lines.push(`  ID: ${row.id} · invocations: ${row.invocation_count}${row.confidence ? " · confidence: " + row.confidence : ""}${row.source ? " · source: " + row.source : ""}`);
         if (row.evidence) lines.push(`  Evidence: ${row.evidence.slice(0, 160)}${row.evidence.length > 160 ? "…" : ""}`);
       }
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      return structuredResult({ items: data, count: data.length }, lines.join("\n"));
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   },
 );

@@ -1,16 +1,31 @@
 // Observations tools — person intelligence: atomic observations + compiled snapshots.
+//
+// Contract convention: see ./CONVENTION.md.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY, WRITE_APPEND, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import {
+  ContactSchema,
+  PersonObservationSchema,
+  PersonSnapshotSchema,
+  ThoughtLinkSchema,
+  listOf,
+  writeResult,
+} from "../lib/schemas.ts";
 
-export const register: RegisterFn = (registrar, supabase, helpers) => {
-  const { ECOS_USER_ID } = helpers;
+export const register: RegisterFn = (registrar, supabase, _helpers) => {
 
   registrar.registerTool(
   "add_person_observation",
   {
     title: "Add Person Observation",
-    description: "Record an analytical observation about a contact — pattern insight, interpretation, hypothesis, or strategy. Separate from interaction event logging.",
+    description:
+      "Record an analytical observation about a contact — pattern insight, interpretation, hypothesis, or strategy.\n" +
+      "Use when: capturing a derived insight about a person. Not for: a factual touchpoint — use `log_interaction`; a general memory — use `capture_thought`.\n" +
+      "Side effects: inserts one person_observations row (append).\n" +
+      "Returns: { ok, id, observation_type, confidence }.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
       observation_type: z.enum(["fact", "observation", "interpretation", "hypothesis", "strategy"]),
@@ -21,6 +36,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       source: z.string().optional().describe("Source client — defaults to 'claude-code'"),
       linked_thought_id: z.string().uuid().optional().describe("UUID of a BRAIN thought this observation is linked to"),
     },
+    outputSchema: writeResult({
+      observation_type: z.string(),
+      confidence: z.number().int(),
+    }),
+    annotations: WRITE_APPEND,
   },
   async ({ contact_id, observation_type, content, confidence, domain_context, observed_at, source, linked_thought_id }) => {
     try {
@@ -38,10 +58,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         })
         .select("id")
         .single();
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      return { content: [{ type: "text" as const, text: `Observation recorded — ID: ${data.id}\nType: ${observation_type} | Confidence: ${confidence}/5${domain_context ? ` | Domain: ${domain_context}` : ""}` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      return structuredResult(
+        { ok: true, id: data.id, observation_type, confidence },
+        `Observation recorded — ID: ${data.id}\nType: ${observation_type} | Confidence: ${confidence}/5${domain_context ? ` | Domain: ${domain_context}` : ""}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -51,12 +74,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "get_person_observations",
   {
     title: "Get Person Observations",
-    description: "Retrieve analytical observations for a contact, grouped by type. Separate from interaction history.",
+    description:
+      "Retrieve analytical observations for a contact (newest first), optionally filtered to one type.\n" +
+      "Use when: reviewing what's been inferred about a person. Not for: the composite card — use `get_person_card`; interaction history — use `get_contact_history`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { items, count } of observations.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
       observation_type: z.enum(["fact", "observation", "interpretation", "hypothesis", "strategy"]).optional().describe("Filter to one type"),
       limit: z.number().optional().default(20),
     },
+    outputSchema: listOf(PersonObservationSchema),
+    annotations: READ_ONLY,
   },
   async ({ contact_id, observation_type, limit }) => {
     try {
@@ -69,8 +98,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       if (observation_type) q = q.eq("observation_type", observation_type);
 
       const { data, error } = await q;
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: `No observations found for contact ${contact_id}${observation_type ? ` of type ${observation_type}` : ""}.` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      if (!data?.length) return structuredResult({ items: [], count: 0 }, `No observations found for contact ${contact_id}${observation_type ? ` of type ${observation_type}` : ""}.`);
 
       type Obs = { id: string; observation_type: string; content: string; confidence: number; domain_context: string | null; observed_at: string; linked_thought_id: string | null };
       const grouped: Record<string, Obs[]> = {};
@@ -88,9 +117,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
         lines.push("");
       }
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      return structuredResult({ items: data, count: data.length }, lines.join("\n"));
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -100,7 +129,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "compile_person_snapshot",
   {
     title: "Compile Person Snapshot",
-    description: "Write a versioned compiled person card for a contact. Uses compile_snapshot_tx to atomically flip the previous snapshot to is_current=false.",
+    description:
+      "Write a versioned compiled person card for a contact.\n" +
+      "Use when: synthesizing observations/thoughts into a durable person card. Not for: a single observation — use `add_person_observation`.\n" +
+      "Side effects: uses compile_snapshot_tx to insert the new snapshot and atomically flip the previous to is_current=false (transactional).\n" +
+      "Returns: { ok, id (snapshot id), contact_id }.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
       snapshot_content: z.string().describe("The compiled person card — readable prose summary"),
@@ -108,6 +141,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       source_observation_ids: z.array(z.string().uuid()).optional().describe("person_observations UUIDs used as source"),
       source_thought_ids: z.array(z.string().uuid()).optional().describe("BRAIN thought UUIDs used as source"),
     },
+    outputSchema: writeResult({
+      contact_id: z.string(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ contact_id, snapshot_content, domains_covered, source_observation_ids, source_thought_ids }) => {
     try {
@@ -119,10 +156,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         p_source_thought_ids: source_thought_ids ?? [],
         p_compiled_by: "claude-code",
       });
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      return { content: [{ type: "text" as const, text: `Person snapshot compiled — ID: ${data}\nContact: ${contact_id}` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      return structuredResult(
+        { ok: true, id: data as string, contact_id },
+        `Person snapshot compiled — ID: ${data}\nContact: ${contact_id}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -132,10 +172,21 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "get_person_card",
   {
     title: "Get Person Card",
-    description: "Composite person card: contact header, latest compiled snapshot, recent observations grouped by type, and linked BRAIN thoughts. Primary agent entry point for pre-meeting context.",
+    description:
+      "Composite person card: contact header, latest compiled snapshot, recent observations, and linked BRAIN thoughts. Primary agent entry point for pre-meeting context.\n" +
+      "Use when: you want the full picture of a person in one call. Not for: just observations — use `get_person_observations`; just interactions — use `get_contact_history`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { contact, snapshot, observations[], brain_links[] } (snapshot is null until one is compiled).",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
     },
+    outputSchema: {
+      contact: ContactSchema,
+      snapshot: PersonSnapshotSchema.nullable(),
+      observations: z.array(PersonObservationSchema),
+      brain_links: z.array(ThoughtLinkSchema),
+    },
+    annotations: READ_ONLY,
   },
   async ({ contact_id }) => {
     try {
@@ -145,7 +196,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         supabase.from("person_observations").select("observation_type, content, confidence, domain_context, observed_at, linked_thought_id").eq("contact_id", contact_id).order("observed_at", { ascending: false }).limit(10),
       ]);
 
-      if (contactRes.error || !contactRes.data) return { content: [{ type: "text" as const, text: `Contact not found: ${contactRes.error?.message ?? "no row"}` }], isError: true };
+      if (contactRes.error || !contactRes.data) return errorResult(`Contact not found: ${contactRes.error?.message ?? "no row"}`, "NOT_FOUND");
       const c = contactRes.data;
 
       const lines: string[] = [
@@ -199,9 +250,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
       }
 
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      return structuredResult(
+        { contact: c, snapshot: snap ?? null, observations: obs, brain_links: thoughtLinks },
+        lines.join("\n"),
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );

@@ -1,9 +1,23 @@
 // BRAIN tools — semantic memory layer (capture, retrieve, update, delete).
 // Registrations flow through the tracked registrar; this module never touches
 // server.registerTool directly.
+//
+// Contract convention: see ./CONVENTION.md. Every tool sets a structured-template
+// description, an annotations preset, and an outputSchema; success paths return
+// structuredResult(payload, humanText) (structured content is additive; the
+// prior human-readable text is preserved byte-for-byte).
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY, WRITE_APPEND, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import {
+  ThoughtSchema,
+  ThoughtBatchSchema,
+  ThoughtStatsSchema,
+  listOf,
+  writeResult,
+} from "../lib/schemas.ts";
 
 export const register: RegisterFn = (registrar, supabase, helpers) => {
   const { getEmbedding, extractMetadata } = helpers;
@@ -14,7 +28,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Search Thoughts",
       description:
-        "Search captured thoughts by meaning. Use this when the user asks about a topic, person, or idea they've previously captured.",
+        "Search captured thoughts by meaning (vector similarity), with optional metadata filters.\n" +
+        "Use when: the user asks about a topic, person, or idea they previously captured. Not for: fetching a known atom by UUID — use `get_thought`/`get_thoughts`; recency browsing — use `list_thoughts`.\n" +
+        "Side effects: none; read only (embeds the query).\n" +
+        "Returns: { items, count } of thought atoms; each item carries a `similarity` score. Never includes the embedding vector.",
       inputSchema: {
         query: z.string().describe("What to search for"),
         limit: z.number().optional().default(10),
@@ -23,6 +40,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         horizon: z.string().optional().describe("Filter by horizon: immediate, project, evergreen"),
         signal_type: z.string().optional().describe("Filter by signal_type: taste, voice, struct, decision, framework, content"),
       },
+      outputSchema: listOf(ThoughtSchema),
+      annotations: READ_ONLY,
     },
     async ({ query, limit, threshold, domain, horizon, signal_type }) => {
       try {
@@ -33,16 +52,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           match_count: limit,
           filter: {},
         });
-        if (error) {
-          return {
-            content: [{ type: "text" as const, text: `Search error: ${error.message}` }],
-            isError: true,
-          };
-        }
+        if (error) return errorResult(`Search error: ${error.message}`);
         if (!data || data.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }],
-          };
+          return structuredResult({ items: [], count: 0 }, `No thoughts found matching "${query}".`);
         }
 
         // Apply post-query metadata filters
@@ -53,9 +65,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (signal_type) filtered = filtered.filter((t: RawResult) => t.metadata?.signal_type === signal_type);
 
         if (filtered.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: `No thoughts found matching "${query}" with the applied filters.` }],
-          };
+          return structuredResult({ items: [], count: 0 }, `No thoughts found matching "${query}" with the applied filters.`);
         }
 
         const results = filtered.map(
@@ -77,19 +87,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             return parts.join("\n");
           }
         );
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Found ${data.length} thought(s):\n\n${results.join("\n\n")}`,
-            },
-          ],
-        };
+        const items = filtered.map((t) => ({
+          id: t.id, content: t.content, metadata: t.metadata, similarity: t.similarity, created_at: t.created_at,
+        }));
+        return structuredResult(
+          { items, count: items.length },
+          `Found ${data.length} thought(s):\n\n${results.join("\n\n")}`,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -100,7 +106,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "List Recent Thoughts",
       description:
-        "List recently captured thoughts with optional filters by type, topic, person, or time range.",
+        "List recently captured thoughts (newest first) with optional filters by type, topic, person, domain, horizon, signal, collection, or time range.\n" +
+        "Use when: browsing recent captures or a named collection. Not for: meaning-based lookup — use `search_thoughts`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { items, count } of thought atoms. Defaults to current rows; pass status='all' to include superseded/archived/split.",
       inputSchema: {
         limit: z.number().optional().default(10),
         type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note"),
@@ -114,6 +123,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         needs_split: z.boolean().optional().describe("Only thoughts flagged as needing a split (metadata.needs_split=true)"),
         status: z.string().optional().describe("Lifecycle filter. Defaults to current rows only (status='current' or null). Pass 'all' to include superseded/archived/split."),
       },
+      outputSchema: listOf(ThoughtSchema),
+      annotations: READ_ONLY,
     },
     async ({ limit, type, topic, person, days, domain, horizon, signal_type, collection_id, needs_split, status }) => {
       try {
@@ -144,14 +155,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           q = q.gte("created_at", since.toISOString());
         }
         const { data, error } = await q;
-        if (error) {
-          return {
-            content: [{ type: "text" as const, text: `Error: ${error.message}` }],
-            isError: true,
-          };
-        }
+        if (error) return errorResult(`Error: ${error.message}`);
         if (!data || !data.length) {
-          return { content: [{ type: "text" as const, text: "No thoughts found." }] };
+          return structuredResult({ items: [], count: 0 }, "No thoughts found.");
         }
         const results = data.map(
           (
@@ -169,19 +175,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}${updated}]${stale} (${meta}${tags ? " — " + tags : ""})\n   ID: ${t.id}\n   ${t.content}`;
           }
         );
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}`,
-            },
-          ],
-        };
+        return structuredResult(
+          { items: data, count: data.length },
+          `${data.length} recent thought(s):\n\n${results.join("\n\n")}`,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -191,8 +190,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "thought_stats",
     {
       title: "Thought Statistics",
-      description: "Get a summary of all captured thoughts: totals, types, top topics, and people.",
+      description:
+        "Summarize all captured thoughts: total count, date range, and top types / topics / people.\n" +
+        "Use when: the user wants an overview of what's in BRAIN. Not for: retrieving specific thoughts — use `search_thoughts`/`list_thoughts`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { total, date_range, types, top_topics, top_people }.",
       inputSchema: {},
+      outputSchema: ThoughtStatsSchema,
+      annotations: READ_ONLY,
     },
     async () => {
       try {
@@ -239,12 +244,19 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           lines.push("", "People mentioned:");
           for (const [k, v] of sort(people)) lines.push(`  ${k}: ${v}`);
         }
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
+        const payload = {
+          total: count ?? 0,
+          date_range: {
+            from: data?.length ? data[data.length - 1].created_at : null,
+            to: data?.length ? data[0].created_at : null,
+          },
+          types,
+          top_topics: Object.fromEntries(sort(topics)),
+          top_people: Object.fromEntries(sort(people)),
         };
+        return structuredResult(payload, lines.join("\n"));
+      } catch (err: unknown) {
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -255,10 +267,23 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Capture Thought",
       description:
-        "Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something to their brain directly from any AI client — notes, insights, decisions, or migrated content from other systems.",
+        "Save a new thought to the Open Brain; auto-generates an embedding and extracts metadata (type/topics/people/etc.).\n" +
+        "Use when: the user wants to save a note, insight, decision, or migrated content. Not for: editing an existing atom — use `update_thought`.\n" +
+        "Side effects: inserts one thoughts row and its embedding (append). Content may be rewritten for self-containment; original_content keeps the raw input.\n" +
+        "Returns: { ok, id, type, topics, people, action_items, needs_split, rewritten, metadata_fallback }.",
       inputSchema: {
         content: z.string().describe("The thought to capture — a clear, standalone statement that will make sense when retrieved later by any AI"),
       },
+      outputSchema: writeResult({
+        type: z.string().nullable().optional(),
+        topics: z.array(z.string()).optional(),
+        people: z.array(z.string()).optional(),
+        action_items: z.array(z.string()).optional(),
+        needs_split: z.boolean().optional(),
+        rewritten: z.boolean().optional().describe("true if content was rewritten for self-containment"),
+        metadata_fallback: z.boolean().optional().describe("true if metadata extraction was unavailable"),
+      }),
+      annotations: WRITE_APPEND,
     },
     async ({ content }) => {
       try {
@@ -286,10 +311,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           },
         }).select("id").single();
         if (error || !inserted?.id) {
-          return {
-            content: [{ type: "text" as const, text: `Failed to capture: ${error?.message ?? "insert returned no id"}` }],
-            isError: true,
-          };
+          return errorResult(`Failed to capture: ${error?.message ?? "insert returned no id"}`);
         }
         let confirmation = `Captured thought ${inserted.id} as ${meta.type || "thought"}`;
         if (Array.isArray(meta.topics) && meta.topics.length)
@@ -304,14 +326,22 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           confirmation += ` | ⚠ needs_split: entry may contain multiple ideas`;
         if (isFallback)
           confirmation += ` | ⚠ metadata extraction unavailable — captured with fallback metadata (backfill pending)`;
-        return {
-          content: [{ type: "text" as const, text: confirmation }],
-        };
+        return structuredResult(
+          {
+            ok: true,
+            id: inserted.id,
+            type: (meta.type as string) ?? null,
+            topics: Array.isArray(meta.topics) ? meta.topics as string[] : [],
+            people: Array.isArray(meta.people) ? meta.people as string[] : [],
+            action_items: Array.isArray(meta.action_items) ? meta.action_items as string[] : [],
+            needs_split: needsSplit,
+            rewritten: storedContent !== content,
+            metadata_fallback: isFallback,
+          },
+          confirmation,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -322,11 +352,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Update Thought",
       description:
-        "Update an existing thought by ID. Archives the old version to thought_history before overwriting. Re-generates embedding and metadata from the new content. Use this to correct stale entries, refine phrasing, or supersede outdated captures.",
+        "Replace an existing thought's content by ID; re-embeds and re-extracts metadata.\n" +
+        "Use when: correcting stale entries, refining phrasing, or superseding an outdated capture. Not for: creating a new atom — use `capture_thought`; removing one — use `delete_thought`.\n" +
+        "Side effects: archives the prior version to thought_history (append), then updates the thoughts row and its embedding (transactional). Nothing is destroyed.\n" +
+        "Returns: { ok, id, topics }.",
       inputSchema: {
         id: z.string().uuid().describe("UUID of the thought to update"),
         content: z.string().describe("The new content to replace the existing entry"),
       },
+      outputSchema: writeResult({
+        topics: z.array(z.string()).optional(),
+      }),
+      annotations: WRITE_TRANSACTIONAL,
     },
     async ({ id, content }) => {
       try {
@@ -337,10 +374,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           .eq("id", id)
           .single();
         if (fetchErr || !existing) {
-          return {
-            content: [{ type: "text" as const, text: `Thought not found: ${fetchErr?.message ?? "no row returned"}` }],
-            isError: true,
-          };
+          return errorResult(`Thought not found: ${fetchErr?.message ?? "no row returned"}`, "NOT_FOUND");
         }
 
         const oldMeta = (existing.metadata || {}) as Record<string, unknown>;
@@ -359,10 +393,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           archived_by: "mcp",
         });
         if (archiveErr) {
-          return {
-            content: [{ type: "text" as const, text: `Failed to archive old version: ${archiveErr.message}` }],
-            isError: true,
-          };
+          return errorResult(`Failed to archive old version: ${archiveErr.message}`);
         }
 
         // Re-extract metadata; storedContent uses rewrite if produced, else input.
@@ -393,10 +424,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           })
           .eq("id", id);
         if (updateErr) {
-          return {
-            content: [{ type: "text" as const, text: `Failed to update thought: ${updateErr.message}` }],
-            isError: true,
-          };
+          return errorResult(`Failed to update thought: ${updateErr.message}`);
         }
 
         const meta = newMetadata as Record<string, unknown>;
@@ -404,12 +432,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (Array.isArray(meta.topics) && meta.topics.length)
           confirmation += `\nTopics: ${(meta.topics as string[]).join(", ")}`;
 
-        return { content: [{ type: "text" as const, text: confirmation }] };
+        return structuredResult(
+          { ok: true, id, topics: Array.isArray(meta.topics) ? meta.topics as string[] : [] },
+          confirmation,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -420,10 +448,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Delete Thought",
       description:
-        "Delete a thought by ID. Archives the full entry to thought_history before removal — nothing is permanently destroyed. Use this to remove duplicates, test entries, or genuinely obsolete captures.",
+        "Remove a thought by ID after archiving the full entry to thought_history — nothing is permanently destroyed.\n" +
+        "Use when: removing duplicates, test entries, or genuinely obsolete captures. Not for: superseding content — use `update_thought`.\n" +
+        "Side effects: appends the entry to thought_history, then deletes the thoughts row (recoverable from history).\n" +
+        "Returns: { ok, id, archived }.",
       inputSchema: {
         id: z.string().uuid().describe("UUID of the thought to delete"),
       },
+      outputSchema: writeResult({
+        archived: z.boolean().describe("true — the entry was archived to thought_history before deletion"),
+      }),
+      annotations: WRITE_TRANSACTIONAL,
     },
     async ({ id }) => {
       try {
@@ -434,10 +469,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           .eq("id", id)
           .single();
         if (fetchErr || !existing) {
-          return {
-            content: [{ type: "text" as const, text: `Thought not found: ${fetchErr?.message ?? "no row returned"}` }],
-            isError: true,
-          };
+          return errorResult(`Thought not found: ${fetchErr?.message ?? "no row returned"}`, "NOT_FOUND");
         }
 
         const oldMeta = (existing.metadata || {}) as Record<string, unknown>;
@@ -456,10 +488,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           archived_by: "mcp",
         });
         if (archiveErr) {
-          return {
-            content: [{ type: "text" as const, text: `Failed to archive before delete: ${archiveErr.message}` }],
-            isError: true,
-          };
+          return errorResult(`Failed to archive before delete: ${archiveErr.message}`);
         }
 
         // Delete from thoughts
@@ -468,21 +497,16 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           .delete()
           .eq("id", id);
         if (deleteErr) {
-          return {
-            content: [{ type: "text" as const, text: `Failed to delete thought: ${deleteErr.message}` }],
-            isError: true,
-          };
+          return errorResult(`Failed to delete thought: ${deleteErr.message}`);
         }
 
         const preview = existing.content.slice(0, 120) + (existing.content.length > 120 ? "…" : "");
-        return {
-          content: [{ type: "text" as const, text: `Deleted thought ${id}\nArchived to thought_history\nContent: ${preview}` }],
-        };
+        return structuredResult(
+          { ok: true, id, archived: true },
+          `Deleted thought ${id}\nArchived to thought_history\nContent: ${preview}`,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -493,10 +517,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Get Thought by ID",
       description:
-        "Fetch a single thought atom by its exact UUID. Resolves regardless of lifecycle status (current, superseded, archived, split) — exact-handle lookup is the provenance guarantee that citations to old atoms stay verifiable. Returns the atom plus its status; does NOT return the embedding vector.",
+        "Fetch a single thought atom by its exact UUID, regardless of lifecycle status (current/superseded/archived/split).\n" +
+        "Use when: resolving a cited/known atom by handle — the provenance guarantee that old citations stay verifiable. Not for: discovery — use `search_thoughts`; multiple IDs at once — use `get_thoughts`.\n" +
+        "Side effects: none; read only. Does NOT return the embedding vector.\n" +
+        "Returns: { thought } with its lifecycle status.",
       inputSchema: {
         thought_id: z.string().uuid().describe("Exact UUID of the thought atom"),
       },
+      outputSchema: { thought: ThoughtSchema },
+      annotations: READ_ONLY,
     },
     async ({ thought_id }) => {
       try {
@@ -509,10 +538,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         // sprint and the column is unwired; selecting it would imply a feature that
         // does not exist. Re-add here if/when a record_retrieval path lands.
         if (error || !t) {
-          return {
-            content: [{ type: "text" as const, text: `Thought not found: ${thought_id}${error ? ` (${error.message})` : ""}` }],
-            isError: true,
-          };
+          return errorResult(`Thought not found: ${thought_id}${error ? ` (${error.message})` : ""}`, "NOT_FOUND");
         }
         const m = (t.metadata || {}) as Record<string, unknown>;
         const lines = [
@@ -530,12 +556,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         // Provenance: surface the raw user input when capture rewrote it for self-containment.
         if (t.original_content && t.original_content !== t.content)
           lines.push(`\n--- original_content (raw input, pre-rewrite) ---\n${t.original_content}`);
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        return structuredResult({ thought: t }, lines.join("\n"));
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );
@@ -546,10 +569,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Get Thoughts by ID (batch)",
       description:
-        "Fetch multiple thought atoms by exact UUID in one call. Preserves input order, reports any IDs that were not found, and includes each atom's lifecycle status. Resolves regardless of status (no lifecycle filter) — same provenance guarantee as get_thought. Use this to resolve all atoms a FIBERR/Filament cites in a single round-trip instead of N searches.",
+        "Fetch multiple thought atoms by exact UUID in one call, preserving input order and reporting any IDs that did not resolve. Resolves regardless of status (no lifecycle filter).\n" +
+        "Use when: resolving all atoms a FIBERR/Filament cites in a single round-trip. Not for: discovery — use `search_thoughts`; a single known ID — use `get_thought`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { items, count, requested, missing } — items are the resolved atoms in input order; missing lists unresolved IDs.",
       inputSchema: {
         thought_ids: z.array(z.string().uuid()).min(1).max(100).describe("Exact UUIDs to fetch (1–100)"),
       },
+      outputSchema: ThoughtBatchSchema,
+      annotations: READ_ONLY,
     },
     async ({ thought_ids }) => {
       try {
@@ -557,16 +585,16 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           .from("thoughts")
           .select("id, content, metadata, status, created_at, updated_at")
           .in("id", thought_ids);
-        if (error) {
-          return { content: [{ type: "text" as const, text: `Batch fetch error: ${error.message}` }], isError: true };
-        }
+        if (error) return errorResult(`Batch fetch error: ${error.message}`);
         const byId = new Map((data ?? []).map((r) => [r.id as string, r]));
         const found: string[] = [];
         const missing: string[] = [];
+        const items: Record<string, unknown>[] = [];
         const blocks = thought_ids.map((id, i) => {
           const t = byId.get(id);
           if (!t) { missing.push(id); return `--- ${i + 1}. ${id} — NOT FOUND ---`; }
           found.push(id);
+          items.push(t);
           const m = (t.metadata || {}) as Record<string, unknown>;
           const stale = t.status && t.status !== "current" ? `  ⚠ ${t.status}` : "";
           const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
@@ -574,12 +602,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         });
         const header = `Resolved ${found.length}/${thought_ids.length} atom(s)` +
           (missing.length ? ` | ${missing.length} not found: ${missing.join(", ")}` : "");
-        return { content: [{ type: "text" as const, text: `${header}\n\n${blocks.join("\n\n")}` }] };
+        return structuredResult(
+          { items, count: items.length, requested: thought_ids.length, missing },
+          `${header}\n\n${blocks.join("\n\n")}`,
+        );
       } catch (err: unknown) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
+        return errorResult(`Error: ${(err as Error).message}`);
       }
     }
   );

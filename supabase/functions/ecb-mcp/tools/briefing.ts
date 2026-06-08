@@ -1,19 +1,36 @@
 // Briefing tools — composite operational reports across CRM domain state.
+//
+// Contract convention: see ./CONVENTION.md.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import { OpportunityBriefSchema } from "../lib/schemas.ts";
 
-export const register: RegisterFn = (registrar, supabase, helpers) => {
-  const { ECOS_USER_ID, RELATIONSHIP_DOMAINS } = helpers;
+export const register: RegisterFn = (registrar, supabase, _helpers) => {
 
   registrar.registerTool(
   "get_briefing_context",
   {
     title: "Get Briefing Context",
-    description: "Returns a structured briefing: follow-ups due in next 7 days, open opportunities by stage, and most recent interaction per domain. Designed for N2 Heartbeat.",
+    description:
+      "Composite operational briefing: follow-ups due in the next N days (overdue/upcoming), open opportunities by stage, and the most recent interaction per domain. Designed for N2 Heartbeat.\n" +
+      "Use when: generating a standup/heartbeat across the whole CRM. Not for: a single contact — use `get_contact_history`/`get_person_card`; just follow-ups — use `get_follow_ups_due`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { follow_ups:{overdue,upcoming}, opportunities[], recent_interactions_by_domain[] }.",
     inputSchema: {
       follow_up_days: z.number().optional().default(7),
     },
+    outputSchema: {
+      follow_ups: z.object({
+        overdue:  z.array(z.record(z.string(), z.unknown())),
+        upcoming: z.array(z.record(z.string(), z.unknown())),
+      }),
+      opportunities: z.array(OpportunityBriefSchema),
+      recent_interactions_by_domain: z.array(z.record(z.string(), z.unknown())),
+    },
+    annotations: READ_ONLY,
   },
   async ({ follow_up_days }) => {
     try {
@@ -93,9 +110,25 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
       }
 
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      const recentInteractionsByDomain = recentByDomain.map((i) => ({
+        domain:           i.professional_contacts[0]?.relationship_domain ?? null,
+        name:             i.professional_contacts[0]?.name ?? null,
+        contact_id:       i.contact_id,
+        interaction_type: i.interaction_type,
+        summary:          i.summary,
+        occurred_at:      i.occurred_at,
+      }));
+
+      return structuredResult(
+        {
+          follow_ups: { overdue, upcoming },
+          opportunities: opps,
+          recent_interactions_by_domain: recentInteractionsByDomain,
+        },
+        lines.join("\n"),
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );

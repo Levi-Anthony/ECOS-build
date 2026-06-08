@@ -5,11 +5,15 @@
 //   get_latest_handoff_snapshot  (read,  READ_ONLY)
 //   append_handoff_event         (write, WRITE_APPEND)
 //   save_handoff_snapshot        (write, WRITE_TRANSACTIONAL)
+//
+// Contract convention: see ./CONVENTION.md. Success paths return
+// structuredResult(payload, humanText); the human-readable JSON text is preserved.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
 import { READ_ONLY, WRITE_APPEND, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
-import { textResult, errorResult } from "../lib/format.ts";
+import { structuredResult, errorResult } from "../lib/format.ts";
+import { HandoffEventSchema, HandoffSnapshotSchema } from "../lib/schemas.ts";
 
 export const register: RegisterFn = (registrar, supabase, helpers) => {
 
@@ -21,7 +25,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         "Read handoff events with optional filters. " +
         "Pass since_event_seq = prior snapshot watermark_event_seq to retrieve only new events " +
         "since the last snapshot — this is the compilation cursor. " +
-        "Results ordered by event_seq ASC (chronological append order).",
+        "Results ordered by event_seq ASC (chronological append order).\n" +
+        "Use when: compiling a snapshot or reviewing the event trail. Not for: the compiled state — use `get_latest_handoff_snapshot`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { events, count } in event_seq order.",
       inputSchema: {
         session_id:      z.string().optional().describe("Filter to a specific session"),
         event_type:      z.string().optional()
@@ -31,6 +38,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         since_event_seq: z.number().int().optional()
                            .describe("Cursor: return events with event_seq > this value (use prior snapshot watermark_event_seq)"),
         limit:           z.number().int().min(1).max(500).optional().default(100),
+      },
+      outputSchema: {
+        events: z.array(HandoffEventSchema),
+        count:  z.number().int(),
       },
       annotations: READ_ONLY,
     },
@@ -54,7 +65,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         const { data, error } = await q;
         if (error) return errorResult(`list_handoff_events: ${error.message}`);
 
-        return textResult(JSON.stringify({ events: data ?? [] }, null, 2));
+        const events = data ?? [];
+        return structuredResult({ events, count: events.length }, JSON.stringify({ events }, null, 2));
       } catch (err: unknown) {
         return errorResult(`list_handoff_events: ${(err as Error).message}`);
       }
@@ -68,8 +80,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       description:
         "Read the current handoff snapshot (is_current = TRUE). " +
         "Returns null when no snapshot exists — client should treat this as a cold start " +
-        "and proceed with BRAIN search alone.",
+        "and proceed with BRAIN search alone.\n" +
+        "Use when: booting/resuming and you want the last compiled state. Not for: raw events — use `list_handoff_events`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { snapshot } (snapshot is null on cold start).",
       inputSchema: {},
+      outputSchema: {
+        snapshot: HandoffSnapshotSchema.nullable(),
+      },
       annotations: READ_ONLY,
     },
     async () => {
@@ -86,7 +104,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
 
         if (error) return errorResult(`get_latest_handoff_snapshot: ${error.message}`);
 
-        return textResult(JSON.stringify({ snapshot: data ?? null }, null, 2));
+        return structuredResult({ snapshot: data ?? null }, JSON.stringify({ snapshot: data ?? null }, null, 2));
       } catch (err: unknown) {
         return errorResult(`get_latest_handoff_snapshot: ${(err as Error).message}`);
       }
@@ -102,7 +120,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         "existing row. event_seq is server-assigned via IDENTITY (monotonic, gaps allowed). " +
         "No embedding is computed — handoff events are operational; semantic recall happens " +
         "on the compiled snapshot, not on individual events. Provide a `client_request_id` " +
-        "to make replays idempotent (unique partial index).",
+        "to make replays idempotent (unique partial index).\n" +
+        "Use when: recording a decision/open-loop/state-change during a session. Not for: compiling the snapshot — use `save_handoff_snapshot`.\n" +
+        "Side effects: inserts one handoff_events row (append).\n" +
+        "Returns: { event } with the server-assigned event_seq.",
       inputSchema: {
         content: z.string().min(1)
           .describe("Event content. Stored verbatim."),
@@ -122,6 +143,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           .describe("ISO timestamp from the client clock (audit only)."),
         client_request_id: z.string().optional()
           .describe("Idempotency key. Unique partial index where not null."),
+      },
+      outputSchema: {
+        event: z.object({
+          id:                z.string(),
+          event_seq:         z.number().int(),
+          event_type:        z.string(),
+          session_id:        z.string().nullable().optional(),
+          surface:           z.string().nullable().optional(),
+          occurred_at:       z.string().nullable().optional(),
+          created_at:        z.string().nullable().optional(),
+          client_request_id: z.string().nullable().optional(),
+        }),
       },
       annotations: WRITE_APPEND,
     },
@@ -148,18 +181,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (error) return errorResult(`append_handoff_event: ${error.message}`);
         if (!data)  return errorResult("append_handoff_event: insert returned no row");
 
-        return textResult(JSON.stringify({
-          event: {
-            id:                data.id,
-            event_seq:         data.event_seq,
-            event_type:        data.event_type,
-            session_id:        data.session_id,
-            surface:           data.surface,
-            occurred_at:       data.occurred_at,
-            created_at:        data.created_at,
-            client_request_id: data.client_request_id,
-          },
-        }, null, 2));
+        const event = {
+          id:                data.id,
+          event_seq:         data.event_seq,
+          event_type:        data.event_type,
+          session_id:        data.session_id,
+          surface:           data.surface,
+          occurred_at:       data.occurred_at,
+          created_at:        data.created_at,
+          client_request_id: data.client_request_id,
+        };
+        return structuredResult({ event }, JSON.stringify({ event }, null, 2));
       } catch (err: unknown) {
         return errorResult(`append_handoff_event: ${(err as Error).message}`);
       }
@@ -177,7 +209,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         "current snapshot in one transaction. Pass an empty source_event_ids[] to invoke the " +
         "manual-override path: watermark falls back to the prior snapshot's watermark and metadata " +
         "is tagged with a warning. Any unresolved UUID in source_event_ids aborts the entire " +
-        "transaction (no rows inserted, prior is_current preserved).",
+        "transaction (no rows inserted, prior is_current preserved).\n" +
+        "Use when: closing a session / writing authoritative resume state. Not for: a single event — use `append_handoff_event`.\n" +
+        "Side effects: embeds content, flips prior is_current → false, inserts the new current snapshot (transactional).\n" +
+        "Returns: { snapshot } with watermark + is_current; metadata_warning_present=true on the manual-override path.",
       inputSchema: {
         content: z.string().min(1)
           .describe("Compiled handoff content. Will be embedded synchronously and stored verbatim."),
@@ -191,6 +226,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         client_request_id: z.string().optional()
           .describe("Idempotency key for offline replay. Unique partial index on snapshots."),
       },
+      outputSchema: {
+        snapshot: z.object({
+          id:                       z.string(),
+          compiled_at:              z.string().nullable().optional(),
+          watermark_event_seq:      z.number().int().nullable().optional(),
+          watermark_occurred_at:    z.string().nullable().optional(),
+          is_current:               z.boolean().nullable().optional(),
+          source_event_count:       z.number().int(),
+          metadata_warning_present: z.boolean(),
+        }),
+      },
       annotations: WRITE_TRANSACTIONAL,
     },
     async ({ content, source_event_ids, session_id, metadata, client_request_id }) => {
@@ -199,7 +245,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (!Array.isArray(vec) || vec.length !== 1536) {
           return errorResult(
             `save_handoff_snapshot: embedding shape invalid ` +
-            `(expected 1536-d array, got ${Array.isArray(vec) ? `length ${vec.length}` : typeof vec})`
+            `(expected 1536-d array, got ${Array.isArray(vec) ? `length ${vec.length}` : typeof vec})`,
+            "UPSTREAM",
           );
         }
         // pgvector accepts the canonical text literal '[v1,v2,...]'. JSON.stringify yields the
@@ -225,18 +272,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
 
         const sourceCount = (source_event_ids ?? []).length;
 
-        return textResult(JSON.stringify({
-          snapshot: {
-            id:                    row.id,
-            compiled_at:           row.compiled_at,
-            watermark_event_seq:   row.watermark_event_seq,
-            watermark_occurred_at: row.watermark_occurred_at,
-            is_current:            row.is_current,
-            source_event_count:    sourceCount,
-            // Server-side: the empty-source path is the only branch that injects a warning.
-            metadata_warning_present: sourceCount === 0,
-          },
-        }, null, 2));
+        const snapshot = {
+          id:                    row.id,
+          compiled_at:           row.compiled_at,
+          watermark_event_seq:   row.watermark_event_seq,
+          watermark_occurred_at: row.watermark_occurred_at,
+          is_current:            row.is_current,
+          source_event_count:    sourceCount,
+          // Server-side: the empty-source path is the only branch that injects a warning.
+          metadata_warning_present: sourceCount === 0,
+        };
+        return structuredResult({ snapshot }, JSON.stringify({ snapshot }, null, 2));
       } catch (err: unknown) {
         return errorResult(`save_handoff_snapshot: ${(err as Error).message}`);
       }
