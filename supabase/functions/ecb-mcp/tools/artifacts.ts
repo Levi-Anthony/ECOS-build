@@ -19,8 +19,40 @@
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
-import { READ_ONLY, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
-import { errorResult, textResult } from "../lib/format.ts";
+import { READ_ONLY, WRITE_APPEND, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import type { ErrorCode } from "../lib/format.ts";
+import { ArtifactManifestSchema, listOf, writeResult } from "../lib/schemas.ts";
+
+// ─── Reusable output shapes (ZodRawShape) for this module ──────────────────────
+// Generous on purpose: a write may apply immediately OR route to a pending
+// human-review proposal, so most fields are optional. Only `applied` is required.
+// (Extra keys in structuredContent are stripped by the SDK; missing-required throws.)
+const patchResultShape = {
+  applied:            z.boolean().describe("true if applied immediately; false if routed to a pending proposal"),
+  routed_to_review:   z.boolean().optional().describe("true when a human-gate/authority op opened a proposal"),
+  key:                z.string().optional(),
+  old_version:        z.number().int().nullable().optional(),
+  new_version:        z.number().int().nullable().optional(),
+  changed_paths:      z.array(z.string()).optional(),
+  summary:            z.string().optional(),
+  review_policy:      z.string().optional(),
+  proposal_id:        z.string().nullable().optional(),
+  status:             z.string().optional(),
+  base_version:       z.number().int().optional(),
+  message:            z.string().optional(),
+  embedding_warnings: z.array(z.string()).optional(),
+};
+
+const manifestBlockSchema = z.object({
+  path:       z.string(),
+  title:      z.string().nullable().optional(),
+  hash:       z.string().nullable().optional(),
+  version:    z.number().int().optional(),
+  sort_order: z.number().optional(),
+  archived:   z.boolean().optional(),
+  updated_at: z.string().optional(),
+});
 
 type Supa = Parameters<RegisterFn>[1];
 type GetEmbedding = (t: string) => Promise<number[]>;
@@ -247,6 +279,17 @@ function formatPatchError(msg: string): string {
   return `Patch rejected: ${msg}`;
 }
 
+// Classify an RPC RAISE message into a stable ErrorCode so agents can branch
+// (re-fetch manifest on VERSION_CONFLICT, re-read block on HASH_CONFLICT, etc.).
+function patchErrorCode(msg: string): ErrorCode {
+  if (msg.includes("VERSION_CONFLICT")) return "VERSION_CONFLICT";
+  if (msg.includes("HASH_CONFLICT")) return "HASH_CONFLICT";
+  if (msg.includes("MISSING_PATH")) return "MISSING_PATH";
+  if (msg.includes("PATH_EXISTS")) return "PATH_EXISTS";
+  if (msg.includes("ARTIFACT_NOT_FOUND")) return "NOT_FOUND";
+  return "UPSTREAM";
+}
+
 // ─── zod shapes ────────────────────────────────────────────────────────────────
 const PatchOp = z.object({
   op: z.enum([
@@ -284,7 +327,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Create Artifact",
       description:
-        "Create a durable, addressable artifact with a stable key and optional initial blocks. Authority-sensitive agent-created artifacts begin as human-gated drafts and cannot self-promote. Returns version 1 if blocks are provided, else version 0. Block embeddings are generated for non-empty blocks.",
+        "Create a durable, addressable artifact with a stable key and optional initial blocks.\n" +
+        "Use when: a new governed document/spec/tracker should exist. Not for: editing an existing artifact — use `patch_artifact`; full-body import — use `replace_artifact_body`.\n" +
+        "Side effects: inserts the artifact + blocks and generates block embeddings (append). Authority-sensitive agent-created artifacts begin as human-gated drafts and cannot self-promote.\n" +
+        "Returns: { ok, id, key, version, status, review_policy, blocks_count } (version 1 if blocks provided, else 0).",
       inputSchema: {
         key:            z.string().describe("Stable unique identifier, e.g. ttc_governance_strategy"),
         title:          z.string(),
@@ -293,6 +339,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         blocks:         z.array(BlockInput).optional().describe("Initial blocks, each at a path like /overview, /current_state"),
         create_snapshot: z.boolean().optional().default(false),
       },
+      outputSchema: writeResult({
+        key:                z.string(),
+        version:            z.number().int(),
+        status:             z.string(),
+        review_policy:      z.string(),
+        blocks_count:       z.number().int(),
+        embedding_warnings: z.array(z.string()).optional(),
+      }),
+      annotations: WRITE_APPEND,
     },
     async ({ key, title, kind, metadata, blocks, create_snapshot }) => {
       try {
@@ -315,12 +370,24 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           const a = await getArtifactById(supabase, res.artifact_id);
           if (a) await doCheckpoint(supabase, a, "markdown", false, false);
         }
-        return textResult([
-          `Created artifact "${res.key}" at version ${res.version} with ${(res.blocks ?? []).length} block(s).`,
-          `  artifact_id: ${res.artifact_id}`,
-          `  status: ${res.status} | review_policy: ${res.review_policy}`,
-          warnings.length ? `  ⚠ embedding warnings:\n   - ${warnings.join("\n   - ")}` : `  Block embeddings generated.`,
-        ].join("\n"));
+        return structuredResult(
+          {
+            ok: true,
+            id: res.artifact_id,
+            key: res.key,
+            version: res.version,
+            status: res.status,
+            review_policy: res.review_policy,
+            blocks_count: (res.blocks ?? []).length,
+            ...(warnings.length ? { embedding_warnings: warnings } : {}),
+          },
+          [
+            `Created artifact "${res.key}" at version ${res.version} with ${(res.blocks ?? []).length} block(s).`,
+            `  artifact_id: ${res.artifact_id}`,
+            `  status: ${res.status} | review_policy: ${res.review_policy}`,
+            warnings.length ? `  ⚠ embedding warnings:\n   - ${warnings.join("\n   - ")}` : `  Block embeddings generated.`,
+          ].join("\n"),
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -333,16 +400,30 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Get Artifact Manifest",
       description:
-        "Default first-read tool. Returns artifact identity, current_version, metadata, and the block index (path/title/hash/version/updated_at) WITHOUT dumping block content. Use the hashes and current_version when preparing a patch.",
+        "Default first-read tool: artifact identity, current_version, metadata, and the block index (path/title/hash/version/updated_at) WITHOUT block content.\n" +
+        "Use when: preparing a patch — the hashes and current_version feed `patch_artifact`. Not for: reading block bodies — use `get_artifact_block`; the compiled document — use `get_artifact_snapshot`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { key, title, kind, status, review_policy, current_version, metadata, blocks[] } (block index only).",
       inputSchema: {
         key:              z.string(),
         include_archived: z.boolean().optional().default(false),
       },
+      outputSchema: {
+        key:             z.string(),
+        title:           z.string(),
+        kind:            z.string(),
+        status:          z.string(),
+        review_policy:   z.string(),
+        current_version: z.number().int(),
+        metadata:        z.record(z.string(), z.unknown()).nullable().optional(),
+        blocks:          z.array(manifestBlockSchema),
+      },
+      annotations: READ_ONLY,
     },
     async ({ key, include_archived }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
-        if (!a) return errorResult(`Artifact not found: ${key}`);
+        if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
         const blocks = await loadBlocks(supabase, a.id, include_archived ?? false);
         const manifest = {
           key: a.key, title: a.title, kind: a.kind, status: a.status, review_policy: a.review_policy,
@@ -353,7 +434,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             archived: isArchived(b) || undefined, updated_at: b.updated_at,
           })),
         };
-        return textResult(JSON.stringify(manifest, null, 2));
+        return structuredResult(manifest, JSON.stringify(manifest, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -365,16 +446,35 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "get_artifact_block",
     {
       title: "Get Artifact Block",
-      description: "Read one or more specific blocks (exact content + content_hash + version). Call this before patching so you can pass expected_hash for each block you touch.",
+      description:
+        "Read one or more specific blocks: exact content + content_hash + version.\n" +
+        "Use when: you need block bodies and the expected_hash to patch them. Not for: the block index without content — use `get_artifact_manifest`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { key, current_version, blocks[] }; a requested path that is missing has { path, error }.",
       inputSchema: {
         key:   z.string(),
         paths: z.array(z.string()).describe("Block paths to read, e.g. ['/current_state','/decision_log']"),
       },
+      outputSchema: {
+        key:             z.string(),
+        current_version: z.number().int(),
+        blocks: z.array(z.object({
+          path:         z.string(),
+          title:        z.string().nullable().optional(),
+          content:      z.string().optional(),
+          content_hash: z.string().nullable().optional(),
+          version:      z.number().int().optional(),
+          metadata:     z.record(z.string(), z.unknown()).nullable().optional(),
+          updated_at:   z.string().optional(),
+          error:        z.string().optional(),
+        })),
+      },
+      annotations: READ_ONLY,
     },
     async ({ key, paths }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
-        if (!a) return errorResult(`Artifact not found: ${key}`);
+        if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
         const { data } = await supabase.from("artifact_blocks").select("*").eq("artifact_id", a.id).in("path", paths);
         const found = (data ?? []) as BlockRow[];
         const out = paths.map(p => {
@@ -382,7 +482,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           if (!b) return { path: p, error: "not found" };
           return { path: b.path, title: b.title, content: b.content, content_hash: b.content_hash, version: b.version, metadata: b.metadata, updated_at: b.updated_at };
         });
-        return textResult(JSON.stringify({ key: a.key, current_version: a.current_version, blocks: out }, null, 2));
+        const payload = { key: a.key, current_version: a.current_version, blocks: out };
+        return structuredResult(payload, JSON.stringify(payload, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -395,7 +496,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Patch Artifact",
       description:
-        "Normal agent write path. Applies an atomic patch immediately for live_audit artifacts, but automatically creates a pending human-review proposal for human_gate artifacts and authority/lifecycle/review-policy operations. Existing-block proposal ops require expected_hash. Never rewrite a whole document.",
+        "Normal agent write path: apply an atomic, block-level patch with optimistic concurrency. Never rewrite a whole document.\n" +
+        "Use when: making a scoped edit to an existing artifact. Not for: creating one — use `create_artifact`; full-body import/repair — use `replace_artifact_body`; review-only staging — use `propose_artifact_patch`.\n" +
+        "Side effects: applies immediately for live_audit artifacts (one immutable revision + changed-block re-embedding); for human_gate artifacts and any authority/lifecycle/review-policy op it instead opens a pending proposal and changes NOTHING. Existing-block ops require expected_hash.\n" +
+        "Returns: { applied, ... } — applied=true with new_version/changed_paths, or applied=false with proposal_id when routed to review.",
       inputSchema: {
         key:             z.string(),
         base_version:    z.number().int().describe("Must equal the artifact's current_version (from the manifest)"),
@@ -405,12 +509,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         actor:           z.string().optional().default("mcp").describe("Agent identifier; actor type is always recorded as agent"),
         source_refs:     z.record(z.string(), z.unknown()).optional(),
       },
+      outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
     async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs }) => {
       try {
         const current = await getArtifactByKey(supabase, key);
-        if (!current) return errorResult(`Artifact not found: ${key}`);
+        if (!current) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
 
         if (requiresHumanReview(current, ops as Record<string, unknown>[])) {
           const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
@@ -423,12 +528,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_source_refs: source_refs ?? {},
             p_metadata: { routed_by: "patch_artifact" },
           });
-          if (error) return errorResult(formatPatchError(error.message));
-          return textResult(JSON.stringify({
-            ...(data as Record<string, unknown>),
+          if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
+          const proposalPayload = {
+            applied: false,
             routed_to_review: true,
             message: "Patch was not applied. It is waiting for explicit human review.",
-          }, null, 2));
+            ...(data as Record<string, unknown>),
+          };
+          return structuredResult(proposalPayload, JSON.stringify(proposalPayload, null, 2));
         }
 
         const { data, error } = await supabase.rpc("apply_artifact_agent_patch_tx", {
@@ -436,7 +543,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_summary: summary, p_actor_id: actor ?? "mcp",
           p_source_refs: source_refs ?? {}, p_admin: false,
         });
-        if (error) return errorResult(formatPatchError(error.message));
+        if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; key: string; old_version: number; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
 
         const a = await getArtifactById(supabase, res.artifact_id);
@@ -445,11 +552,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           const fresh = await getArtifactById(supabase, res.artifact_id);
           if (fresh) await doCheckpoint(supabase, fresh, "markdown", false, false);
         }
-        return textResult(JSON.stringify({
+        const appliedPayload = {
+          applied: true,
           key: res.key, old_version: res.old_version, new_version: res.new_version,
           changed_paths: res.changed_paths, summary, review_policy: current.review_policy,
           ...(warnings.length ? { embedding_warnings: warnings } : {}),
-        }, null, 2));
+        };
+        return structuredResult(appliedPayload, JSON.stringify(appliedPayload, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -461,7 +570,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "search_artifacts",
     {
       title: "Search Artifacts",
-      description: "Block-level semantic search across active artifacts by default. Returns matching blocks with artifact key, status, block path, title, similarity, and a content excerpt. Pass status='draft' for explicit draft/review retrieval or include_non_active=true to search all statuses.",
+      description:
+        "Block-level semantic search across artifacts (active only by default), returning matching blocks with a content excerpt.\n" +
+        "Use when: finding which artifact/block discusses something. Not for: listing artifacts by filter — use `list_artifacts`; reading a known artifact — use `get_artifact_manifest`.\n" +
+        "Side effects: none; read only (embeds the query). Pass status='draft' or include_non_active=true to widen scope.\n" +
+        "Returns: { items, count } — each item has artifact_key/title/kind/status, block_path/title, similarity, and an excerpt.",
       inputSchema: {
         query:     z.string(),
         limit:     z.number().int().min(1).max(50).optional().default(10),
@@ -471,6 +584,16 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         status:    z.string().optional().default("active"),
         include_non_active: z.boolean().optional().default(false),
       },
+      outputSchema: listOf(z.object({
+        artifact_key:    z.string(),
+        artifact_title:  z.string(),
+        kind:            z.string(),
+        artifact_status: z.string(),
+        block_path:      z.string(),
+        block_title:     z.string().nullable().optional(),
+        similarity:      z.number(),
+        excerpt:         z.string(),
+      })),
       annotations: READ_ONLY,
     },
     async ({ query, limit, threshold, kind, key, status, include_non_active }) => {
@@ -484,7 +607,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (error) return errorResult(`Search error: ${error.message}`);
         type R = { artifact_key: string; artifact_title: string; kind: string; artifact_status: string; block_path: string; block_title: string | null; content: string; similarity: number };
         const rows = (data ?? []) as R[];
-        if (!rows.length) return textResult(`No artifact blocks found matching "${query}".`);
+        if (!rows.length) return structuredResult({ items: [], count: 0 }, `No artifact blocks found matching "${query}".`);
         const out = rows.map((r, i) => [
           `--- Result ${i + 1} (${(r.similarity * 100).toFixed(1)}% match) ---`,
           `Artifact: ${r.artifact_title} [${r.kind}; ${r.artifact_status}] (key: ${r.artifact_key})`,
@@ -492,7 +615,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           "",
           r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
         ].join("\n"));
-        return textResult(out.join("\n\n"));
+        const items = rows.map((r) => ({
+          artifact_key: r.artifact_key, artifact_title: r.artifact_title, kind: r.kind,
+          artifact_status: r.artifact_status, block_path: r.block_path, block_title: r.block_title,
+          similarity: r.similarity,
+          excerpt: r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
+        }));
+        return structuredResult({ items, count: items.length }, out.join("\n\n"));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -504,22 +633,37 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "checkpoint_artifact",
     {
       title: "Checkpoint Artifact",
-      description: "Write the database-canonical markdown + exact block-state snapshot for the current version. Idempotent unless force=true; legacy format requests are recorded but normalized to canonical markdown.",
+      description:
+        "Write the database-canonical markdown + exact block-state snapshot for the current version.\n" +
+        "Use when: pinning a durable, citeable version. Not for: reading a snapshot — use `get_artifact_snapshot`.\n" +
+        "Side effects: inserts an artifact_snapshots row (append). Idempotent unless force=true; legacy format requests are normalized to canonical markdown.\n" +
+        "Returns: { ok, key, version, created, chars } (created=false when a snapshot already existed).",
       inputSchema: {
         key:              z.string(),
         format:           z.enum(["markdown", "json"]).optional().default("markdown"),
         include_archived: z.boolean().optional().default(false),
         force:            z.boolean().optional().default(false),
       },
+      outputSchema: {
+        ok:      z.boolean(),
+        key:     z.string(),
+        version: z.number().int(),
+        created: z.boolean().describe("true if a new snapshot was written; false if one already existed"),
+        chars:   z.number().int().optional(),
+      },
+      annotations: WRITE_APPEND,
     },
     async ({ key, format, include_archived, force }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
-        if (!a) return errorResult(`Artifact not found: ${key}`);
+        if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
         const r = await doCheckpoint(supabase, a, format ?? "markdown", include_archived ?? false, force ?? false);
-        return textResult(r.created
-          ? `Snapshot created for "${key}" at version ${r.version} (${r.content.length} chars).`
-          : `Snapshot already exists for "${key}" at version ${r.version} (pass force=true to recompile).`);
+        return structuredResult(
+          { ok: true, key: a.key, version: r.version, created: r.created, chars: r.content.length },
+          r.created
+            ? `Snapshot created for "${key}" at version ${r.version} (${r.content.length} chars).`
+            : `Snapshot already exists for "${key}" at version ${r.version} (pass force=true to recompile).`,
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -531,37 +675,56 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "get_artifact_snapshot",
     {
       title: "Get Artifact Snapshot",
-      description: "Read a compiled full-document snapshot. Returns the requested version, or the latest stored snapshot, or compiles current blocks on demand if no snapshot exists.",
+      description:
+        "Read a compiled full-document snapshot: the requested version, else the latest stored snapshot, else current blocks compiled on demand.\n" +
+        "Use when: you want the whole artifact as one document. Not for: the block index — use `get_artifact_manifest`; individual blocks — use `get_artifact_block`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { key, version, compiled_content } (+ block_state/reconstructable when include_block_state=true; on_demand=true when compiled live).",
       inputSchema: {
         key:     z.string(),
         version: z.number().int().optional(),
         include_block_state: z.boolean().optional().default(false),
+      },
+      outputSchema: {
+        key:              z.string(),
+        version:          z.number().int(),
+        compiled_content: z.string(),
+        reconstructable:  z.boolean().optional(),
+        block_state:      z.unknown().optional(),
+        on_demand:        z.boolean().optional().describe("true when compiled live because no stored snapshot existed"),
       },
       annotations: READ_ONLY,
     },
     async ({ key, version, include_block_state }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
-        if (!a) return errorResult(`Artifact not found: ${key}`);
+        if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
         let q = supabase.from("artifact_snapshots").select("version, compiled_content, block_state, metadata").eq("artifact_id", a.id);
         q = version != null ? q.eq("version", version) : q.order("version", { ascending: false }).limit(1);
         const { data } = await q.maybeSingle();
         const snap = data as { version: number; compiled_content: string; block_state: unknown; metadata: Record<string, unknown> } | null;
         if (snap) {
           if (include_block_state) {
-            return textResult(JSON.stringify({
+            const payload = {
               key: a.key,
               version: snap.version,
               reconstructable: snap.metadata?.reconstructable === true,
               compiled_content: snap.compiled_content,
               block_state: snap.block_state,
-            }, null, 2));
+            };
+            return structuredResult(payload, JSON.stringify(payload, null, 2));
           }
-          return textResult(`# Snapshot v${snap.version}\n\n${snap.compiled_content}`);
+          return structuredResult(
+            { key: a.key, version: snap.version, compiled_content: snap.compiled_content },
+            `# Snapshot v${snap.version}\n\n${snap.compiled_content}`,
+          );
         }
         if (version != null) return errorResult(`No snapshot for "${key}" at version ${version}.`);
         const compiled = await compileArtifact(supabase, a, "markdown", false);
-        return textResult(`# Compiled on demand (no stored snapshot) — v${a.current_version}\n\n${compiled}`);
+        return structuredResult(
+          { key: a.key, version: a.current_version, compiled_content: compiled, on_demand: true },
+          `# Compiled on demand (no stored snapshot) — v${a.current_version}\n\n${compiled}`,
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -573,24 +736,50 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "get_artifact",
     {
       title: "Get Artifact (compat)",
-      description: "Compatibility read: returns artifact header + the compiled current body. Accepts a key or a legacy artifact_id (UUID). For editing, prefer get_artifact_manifest + get_artifact_block.",
+      description:
+        "Compatibility read: artifact header + the compiled current body. Accepts a key or a legacy artifact_id (UUID).\n" +
+        "Use when: a quick whole-artifact read by key or legacy id. Not for: editing — prefer `get_artifact_manifest` + `get_artifact_block`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { key, id, title, kind, status, review_policy, version, body? }.",
       inputSchema: {
         key:          z.string().optional(),
         artifact_id:  z.string().uuid().optional(),
         include_body: z.boolean().optional().default(true),
       },
+      outputSchema: {
+        key:           z.string(),
+        id:            z.string(),
+        title:         z.string(),
+        kind:          z.string(),
+        status:        z.string(),
+        review_policy: z.string(),
+        version:       z.number().int(),
+        body:          z.string().optional(),
+      },
+      annotations: READ_ONLY,
     },
     async ({ key, artifact_id, include_body }) => {
       try {
         const a = key ? await getArtifactByKey(supabase, key) : artifact_id ? await getArtifactById(supabase, artifact_id) : null;
-        if (!a) return errorResult("Artifact not found (provide key or artifact_id).");
+        if (!a) return errorResult("Artifact not found (provide key or artifact_id).", "NOT_FOUND");
         const header = [
           `## ${a.title}`, `key: ${a.key} | id: ${a.id}`,
           `Kind: ${a.kind} | Status: ${a.status} | Review: ${a.review_policy} | Version: ${a.current_version}`,
           `Updated: ${new Date(a.updated_at).toLocaleDateString()}`,
         ];
-        if (include_body ?? true) header.push("", await compileArtifact(supabase, a, "markdown", false));
-        return textResult(header.join("\n"));
+        let body: string | undefined;
+        if (include_body ?? true) {
+          body = await compileArtifact(supabase, a, "markdown", false);
+          header.push("", body);
+        }
+        return structuredResult(
+          {
+            key: a.key, id: a.id, title: a.title, kind: a.kind, status: a.status,
+            review_policy: a.review_policy, version: a.current_version,
+            ...(body !== undefined ? { body } : {}),
+          },
+          header.join("\n"),
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -602,13 +791,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "list_artifacts",
     {
       title: "List Artifacts",
-      description: "List artifacts with optional filters (kind, status, review_policy). Returns headers with key/title/kind/version and governance state.",
+      description:
+        "List artifacts (headers only) with optional filters by kind, status, and review_policy.\n" +
+        "Use when: browsing/inventorying artifacts. Not for: content search — use `search_artifacts`; reading one — use `get_artifact_manifest`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { items, count } of artifact manifests (key/title/kind/version + governance state).",
       inputSchema: {
         kind:   z.string().optional(),
         status: z.string().optional(),
         review_policy: z.enum(["live_audit", "human_gate"]).optional(),
         limit:  z.number().int().min(1).max(100).optional().default(20),
       },
+      outputSchema: listOf(ArtifactManifestSchema),
       annotations: READ_ONLY,
     },
     async ({ kind, status, review_policy, limit }) => {
@@ -621,13 +815,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         const { data, error } = await q;
         if (error) return errorResult(`Error: ${error.message}`);
         const rows = (data ?? []) as ArtifactRow[];
-        if (!rows.length) return textResult("No artifacts found.");
+        if (!rows.length) return structuredResult({ items: [], count: 0 }, "No artifacts found.");
         const lines = [`${rows.length} artifact(s):\n`];
         for (const a of rows) {
           lines.push(`• ${a.title} [${a.kind}] — key: ${a.key}`);
           lines.push(`  v${a.current_version} | ${a.status} | ${a.review_policy} | Updated: ${new Date(a.updated_at).toLocaleDateString()}`);
         }
-        return textResult(lines.join("\n"));
+        return structuredResult({ items: rows, count: rows.length }, lines.join("\n"));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -639,7 +833,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "link_artifact",
     {
       title: "Link Artifact",
-      description: "Link an artifact to a related thought, contact, entity, or opportunity (provenance chains). Accepts a key or a legacy artifact_id.",
+      description:
+        "Link an artifact to a related thought, contact, entity, or opportunity (provenance chains). Accepts a key or a legacy artifact_id.\n" +
+        "Use when: recording how an artifact relates to another record. Not for: editing artifact content — use `patch_artifact`.\n" +
+        "Side effects: inserts one artifact_links row (append).\n" +
+        "Returns: { ok, id (link id), artifact_key, linked_type, linked_id, relationship_type }.",
       inputSchema: {
         key:               z.string().optional(),
         artifact_id:       z.string().uuid().optional(),
@@ -648,16 +846,27 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         relationship_type: z.enum(["governs", "supplements", "derived_from", "implements", "references"]),
         note:              z.string().optional(),
       },
+      outputSchema: writeResult({
+        artifact_key:      z.string(),
+        linked_type:       z.string(),
+        linked_id:         z.string(),
+        relationship_type: z.string(),
+      }),
+      annotations: WRITE_APPEND,
     },
     async ({ key, artifact_id, linked_type, linked_id, relationship_type, note }) => {
       try {
         const a = key ? await getArtifactByKey(supabase, key) : artifact_id ? await getArtifactById(supabase, artifact_id) : null;
-        if (!a) return errorResult("Artifact not found (provide key or artifact_id).");
+        if (!a) return errorResult("Artifact not found (provide key or artifact_id).", "NOT_FOUND");
         const { data, error } = await supabase.from("artifact_links")
           .insert({ artifact_id: a.id, linked_type, linked_id, relationship_type, note: note ?? null })
           .select("id").single();
         if (error || !data) return errorResult(`Failed to create link: ${error?.message ?? "no row"}`);
-        return textResult(`Linked artifact ${a.key} → ${linked_type} ${linked_id} (${relationship_type}). Link ID: ${(data as { id: string }).id}`);
+        const linkId = (data as { id: string }).id;
+        return structuredResult(
+          { ok: true, id: linkId, artifact_key: a.key, linked_type, linked_id, relationship_type },
+          `Linked artifact ${a.key} → ${linked_type} ${linked_id} (${relationship_type}). Link ID: ${linkId}`,
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -670,7 +879,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Propose Artifact Patch",
       description:
-        "Create a pending artifact change proposal without changing current blocks, embeddings, or authority. Existing-block ops MUST include expected_hash. Use when a change should be prepared for explicit human review.",
+        "Stage a pending artifact change proposal WITHOUT touching current blocks, embeddings, or authority.\n" +
+        "Use when: a change should be prepared for explicit human review regardless of policy. Not for: applying a live edit — use `patch_artifact`.\n" +
+        "Side effects: inserts a pending proposal (append). Existing-block ops MUST include expected_hash.\n" +
+        "Returns: { applied:false, proposal_id, status, ... } — current artifact state is unchanged.",
       inputSchema: {
         key:                    z.string(),
         base_version:           z.number().int(),
@@ -680,6 +892,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         source_refs:            z.record(z.string(), z.unknown()).optional(),
         supersedes_proposal_id: z.string().uuid().optional(),
       },
+      outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
     async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id }) => {
@@ -695,11 +908,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_supersedes_proposal_id: supersedes_proposal_id ?? null,
           p_metadata: { submitted_via: "propose_artifact_patch" },
         });
-        if (error) return errorResult(formatPatchError(error.message));
-        return textResult(JSON.stringify({
-          ...(data as Record<string, unknown>),
+        if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
+        const proposePayload = {
+          applied: false,
           message: "Proposal created. Current artifact state is unchanged.",
-        }, null, 2));
+          ...(data as Record<string, unknown>),
+        };
+        return structuredResult(proposePayload, JSON.stringify(proposePayload, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -711,12 +926,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "list_artifact_change_proposals",
     {
       title: "List Artifact Change Proposals",
-      description: "List pending/recent artifact change proposals for human review. Read-only.",
+      description:
+        "List pending/recent artifact change proposals (each joined to its artifact) for the human-review queue.\n" +
+        "Use when: surfacing what is awaiting review. Not for: one proposal's full detail/event trail — use `get_artifact_change_proposal`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { items, count } — each item is a proposal with an attached `artifact` summary.",
       inputSchema: {
         status: z.enum(["pending", "revision_requested", "approved", "rejected", "conflicted", "superseded"]).optional().default("pending"),
         key:    z.string().optional(),
         limit:  z.number().int().min(1).max(100).optional().default(20),
       },
+      outputSchema: listOf(z.record(z.string(), z.unknown())),
       annotations: READ_ONLY,
     },
     async ({ status, key, limit }) => {
@@ -724,7 +944,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         let artifactId: string | null = null;
         if (key) {
           const artifact = await getArtifactByKey(supabase, key);
-          if (!artifact) return errorResult(`Artifact not found: ${key}`);
+          if (!artifact) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
           artifactId = artifact.id;
         }
         let q = supabase.from("artifact_change_proposals")
@@ -741,10 +961,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           ? await supabase.from("artifacts").select("id, key, title, kind, status, review_policy, current_version").in("id", ids)
           : { data: [] };
         const byId = new Map(((artifacts ?? []) as Record<string, unknown>[]).map(a => [a.id as string, a]));
-        return textResult(JSON.stringify(proposals.map(p => ({
+        const items = proposals.map(p => ({
           ...p,
           artifact: byId.get(p.artifact_id as string) ?? null,
-        })), null, 2));
+        }));
+        return structuredResult({ items, count: items.length }, JSON.stringify(items, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -756,9 +977,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "get_artifact_change_proposal",
     {
       title: "Get Artifact Change Proposal",
-      description: "Read one proposal, its artifact governance state, and its append-only review event trail. Does not alter the proposal.",
+      description:
+        "Read one proposal, its artifact governance state, and its append-only review event trail.\n" +
+        "Use when: inspecting a specific proposal before acting on it. Not for: the queue — use `list_artifact_change_proposals`.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { proposal, artifact, events[] }.",
       inputSchema: {
         proposal_id: z.string().uuid(),
+      },
+      outputSchema: {
+        proposal: z.record(z.string(), z.unknown()),
+        artifact: z.record(z.string(), z.unknown()).nullable(),
+        events:   z.array(z.record(z.string(), z.unknown())),
       },
       annotations: READ_ONLY,
     },
@@ -766,14 +996,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const { data: proposal, error } = await supabase.from("artifact_change_proposals")
           .select("*").eq("id", proposal_id).maybeSingle();
-        if (error || !proposal) return errorResult(`Proposal not found: ${proposal_id}`);
+        if (error || !proposal) return errorResult(`Proposal not found: ${proposal_id}`, "NOT_FOUND");
         const p = proposal as Record<string, unknown>;
         const { data: artifact } = await supabase.from("artifacts")
           .select("id, key, title, kind, status, review_policy, current_version, metadata")
           .eq("id", p.artifact_id).maybeSingle();
         const { data: events } = await supabase.from("artifact_review_events")
           .select("*").eq("proposal_id", proposal_id).order("created_at", { ascending: true });
-        return textResult(JSON.stringify({ proposal: p, artifact, events: events ?? [] }, null, 2));
+        const payload = { proposal: p, artifact: artifact ?? null, events: events ?? [] };
+        return structuredResult(payload, JSON.stringify(payload, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -786,7 +1017,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Replace Artifact Body (admin/import only)",
       description:
-        "⚠ DANGEROUS / NOT THE NORMAL WRITE PATH. Replaces the entire artifact body, reconciling it into blocks by heading. Requires an explicit mode (admin_import|migration|repair). For normal updates use patch_artifact with block-level ops.",
+        "⚠ DANGEROUS / NOT THE NORMAL WRITE PATH. Replace the ENTIRE artifact body, reconciling it into blocks by heading. Requires an explicit mode.\n" +
+        "Use when: admin import, migration, or repair only. Not for: normal edits — use `patch_artifact` with block-level ops.\n" +
+        "Side effects: derives create/replace/delete ops across all blocks (transactional) and re-snapshots; human-gated artifacts route the whole replacement to a proposal instead.\n" +
+        "Returns: { applied, ... } — applied=true with new_version/changed_paths, or applied=false with proposal_id when routed to review.",
       inputSchema: {
         key:          z.string(),
         base_version: z.number().int(),
@@ -794,12 +1028,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         summary:      z.string(),
         mode:         z.enum(["admin_import", "migration", "repair"]),
       },
+      outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
     async ({ key, base_version, body, summary, mode }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
-        if (!a) return errorResult(`Artifact not found: ${key}`);
+        if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
 
         // Split body into flat heading sections → block paths; fallback /body.
         const newBlocks = splitBodyIntoBlocks(body);
@@ -834,12 +1069,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_source_refs: {},
             p_metadata: { mode, routed_by: "replace_artifact_body" },
           });
-          if (error) return errorResult(formatPatchError(error.message));
-          return textResult(JSON.stringify({
-            ...(data as Record<string, unknown>),
+          if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
+          const routedPayload = {
+            applied: false,
             routed_to_review: true,
             message: "Full-body replacement was not applied because this artifact is human-gated.",
-          }, null, 2));
+            ...(data as Record<string, unknown>),
+          };
+          return structuredResult(routedPayload, JSON.stringify(routedPayload, null, 2));
         }
 
         const { data, error } = await supabase.rpc("apply_artifact_agent_patch_tx", {
@@ -847,19 +1084,29 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_summary: `[${mode}] ${summary}`, p_actor_id: `replace_artifact_body:${mode}`,
           p_source_refs: { mode }, p_admin: true,
         });
-        if (error) return errorResult(formatPatchError(error.message));
+        if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
 
         const warnings = await applyChangedEmbeddings(supabase, getEmbedding, { id: a.id, title: a.title }, res.changed ?? []);
         const fresh = await getArtifactById(supabase, res.artifact_id);
         if (fresh) await doCheckpoint(supabase, fresh, "markdown", false, true);
-        return textResult([
-          `[${mode}] Replaced body of "${key}" → version ${res.new_version}.`,
-          `  Blocks now: ${newBlocks.map(b => b.path).join(", ")}`,
-          `  Changed: ${res.changed_paths.join(", ")}`,
-          `  Snapshot created.`,
-          warnings.length ? `  ⚠ embedding warnings:\n   - ${warnings.join("\n   - ")}` : "",
-        ].filter(Boolean).join("\n"));
+        return structuredResult(
+          {
+            applied: true,
+            key,
+            new_version: res.new_version,
+            changed_paths: res.changed_paths,
+            summary: `[${mode}] ${summary}`,
+            ...(warnings.length ? { embedding_warnings: warnings } : {}),
+          },
+          [
+            `[${mode}] Replaced body of "${key}" → version ${res.new_version}.`,
+            `  Blocks now: ${newBlocks.map(b => b.path).join(", ")}`,
+            `  Changed: ${res.changed_paths.join(", ")}`,
+            `  Snapshot created.`,
+            warnings.length ? `  ⚠ embedding warnings:\n   - ${warnings.join("\n   - ")}` : "",
+          ].filter(Boolean).join("\n"),
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -871,13 +1118,25 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     "reindex_artifact_embeddings",
     {
       title: "Reindex Artifact Embeddings",
-      description: "Regenerate block embeddings in CONVERGING BATCHES. By default (only_missing=true) it skips blocks that already have embeddings and embeds up to `limit` of the rest, reporting how many remain — re-run until it reports 0. Large corpora MUST be swept this way because each call embeds synchronously within one request and a full sweep exceeds the edge wall-clock. Scope to one artifact (key) or one block (key+path); only_missing=false forces re-embedding.",
+      description:
+        "Regenerate block embeddings in CONVERGING BATCHES. Default (only_missing=true) skips already-embedded blocks and embeds up to `limit` of the rest, reporting how many remain — re-run until remaining=0.\n" +
+        "Use when: backfilling/repairing the embedding index. Not for: normal edits (patch_artifact re-embeds changed blocks itself).\n" +
+        "Side effects: deletes+reinserts artifact_block_embeddings for targeted blocks (transactional). Large corpora MUST be swept across calls — each call embeds synchronously and a full sweep exceeds the edge wall-clock. Scope to one artifact (key) or one block (key+path); only_missing=false forces re-embedding.\n" +
+        "Returns: { ok, embedded, remaining, scope, warnings? } — re-run while remaining > 0.",
       inputSchema: {
         key:          z.string().optional(),
         path:         z.string().optional(),
         limit:        z.number().int().min(1).max(2000).optional().default(25),
         only_missing: z.boolean().optional().default(true),
       },
+      outputSchema: {
+        ok:        z.boolean(),
+        embedded:  z.number().int().describe("Blocks embedded in this call"),
+        remaining: z.number().int().describe("Blocks still missing embeddings (0 when only_missing=false)"),
+        scope:     z.string().describe("Artifact key, or 'sweep' for the whole corpus"),
+        warnings:  z.array(z.string()).optional(),
+      },
+      annotations: WRITE_TRANSACTIONAL,
     },
     async ({ key, path, limit, only_missing }) => {
       try {
@@ -887,7 +1146,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         let blocksQ = supabase.from("artifact_blocks").select("id, artifact_id, path, title, content, metadata");
         if (key) {
           const a = await getArtifactByKey(supabase, key);
-          if (!a) return errorResult(`Artifact not found: ${key}`);
+          if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
           titles.set(a.id, a.title);
           blocksQ = blocksQ.eq("artifact_id", a.id);
           if (path) blocksQ = blocksQ.eq("path", path);
@@ -915,11 +1174,20 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           if (r.ok) embedded += 1; else if (r.error) warnings.push(r.error);
         }
         const remaining = onlyMissing ? Math.max(0, missingTotal - embedded) : 0;
-        return textResult([
-          `Reindexed ${embedded} block(s)${key ? ` for "${key}"` : " (sweep)"}.`,
-          onlyMissing ? (remaining > 0 ? `${remaining} block(s) still missing embeddings — re-run to continue.` : "All targeted blocks now embedded.") : "",
-          warnings.length ? `⚠ warnings:\n - ${warnings.join("\n - ")}` : "",
-        ].filter(Boolean).join("\n"));
+        return structuredResult(
+          {
+            ok: true,
+            embedded,
+            remaining,
+            scope: key ?? "sweep",
+            ...(warnings.length ? { warnings } : {}),
+          },
+          [
+            `Reindexed ${embedded} block(s)${key ? ` for "${key}"` : " (sweep)"}.`,
+            onlyMissing ? (remaining > 0 ? `${remaining} block(s) still missing embeddings — re-run to continue.` : "All targeted blocks now embedded.") : "",
+            warnings.length ? `⚠ warnings:\n - ${warnings.join("\n - ")}` : "",
+          ].filter(Boolean).join("\n"),
+        );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -941,7 +1209,7 @@ function splitBodyIntoBlocks(body: string): { path: string; title: string | null
   const flush = () => {
     const content = curLines.join("\n").trim();
     if (!content && curTitle === null) return;
-    let base = curTitle ? "/" + slugify(curTitle) : "/body";
+    const base = curTitle ? "/" + slugify(curTitle) : "/body";
     let path = base; let n = 2;
     while (usedPaths.has(path)) path = `${base}-${n++}`;
     usedPaths.add(path);

@@ -15,7 +15,8 @@
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
 import { READ_ONLY } from "../lib/annotations.ts";
-import { textResult, errorResult } from "../lib/format.ts";
+import { structuredResult } from "../lib/format.ts";
+import { HandoffSnapshotSchema, PulseEntrySchema } from "../lib/schemas.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,11 +131,29 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
         "latest handoff snapshot, recent pulse entries (last 20), derived orientation, " +
         "boot artifacts (v2 artifacts tagged 'boot'), and server time. " +
         "Any sub-fetch failure degrades that field to null/[] but the call still succeeds. " +
-        "Client decides what is enough to boot.",
+        "Client decides what is enough to boot.\n" +
+        "Use when: cold-starting or resuming a session (one round-trip). Not for: targeted reads — use the specific read tool.\n" +
+        "Side effects: none; read only.\n" +
+        "Returns: { handoff_snapshot, recent_pulse, derived_orientation, boot_artifacts, server_time, degraded_hints } — degraded_hints is non-null only when a sub-fetch failed.",
       inputSchema: {
         surface:    z.string().describe("Calling surface: desktop | mobile | shortcut | cron"),
         session_id: z.string().optional().describe("New session UUID — used to scope pulse since filter"),
         since:      z.string().optional().describe("ISO timestamp — only pulses at or after this time"),
+      },
+      outputSchema: {
+        handoff_snapshot: HandoffSnapshotSchema.nullable(),
+        recent_pulse:     z.array(PulseEntrySchema),
+        derived_orientation: z.object({
+          mode:             z.string().nullable(),
+          focus:            z.string().nullable(),
+          open_loops:       z.array(z.string()),
+          highest_leverage: z.string().nullable(),
+          constraints:      z.string().nullable(),
+          content_md:       z.string(),
+        }),
+        boot_artifacts: z.array(z.record(z.string(), z.unknown())),
+        server_time:    z.string(),
+        degraded_hints: z.record(z.string(), z.unknown()).nullable(),
       },
       annotations: READ_ONLY,
     },
@@ -248,7 +267,7 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
         degraded_hints:      Object.keys(degraded).length > 0 ? degraded : null,
       };
 
-      return textResult(JSON.stringify(payload, null, 2));
+      return structuredResult(payload, JSON.stringify(payload, null, 2));
     }
   );
 

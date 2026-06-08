@@ -1,7 +1,12 @@
 // Billing tools — IT consulting service log + invoice tracking.
+//
+// Contract convention: see ./CONVENTION.md.
 
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
+import { READ_ONLY, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
+import { ServiceLogSchema, listOf, writeResult } from "../lib/schemas.ts";
 
 export const register: RegisterFn = (registrar, supabase, helpers) => {
   const { ECOS_USER_ID } = helpers;
@@ -10,7 +15,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "log_service_call",
   {
     title: "Log Service Call",
-    description: "Log an IT service call for a client. Inserts into it_service_logs and updates last_contacted on the contact.",
+    description:
+      "Log an IT service call for a client and bump their last_contacted date.\n" +
+      "Use when: recording IT work done for a client. Not for: a generic touchpoint — use `log_interaction`; invoicing — use `create_billing_entry`.\n" +
+      "Side effects: inserts one it_service_logs row and updates last_contacted on the contact (transactional).\n" +
+      "Returns: { ok, id, service_type, time_spent_minutes }.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID of the IT client"),
       service_type: z.enum(["onsite", "remote", "phone", "email", "project", "maintenance"]),
@@ -22,6 +31,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       follow_up_needed: z.boolean().optional().default(false),
       follow_up_notes: z.string().optional(),
     },
+    outputSchema: writeResult({
+      service_type: z.string(),
+      time_spent_minutes: z.number().nullable(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ contact_id, service_type, description, service_date, time_spent_minutes, billable, resolution, follow_up_needed, follow_up_notes }) => {
     try {
@@ -42,16 +56,19 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         })
         .select("id")
         .single();
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (error) return errorResult(`Error: ${error.message}`);
 
       await supabase
         .from("professional_contacts")
         .update({ last_contacted: today, updated_at: new Date().toISOString() })
         .eq("id", contact_id);
 
-      return { content: [{ type: "text" as const, text: `Logged ${service_type} service call for contact ${contact_id} — ID: ${data.id}${time_spent_minutes ? ` (${time_spent_minutes} min)` : ""}` }] };
+      return structuredResult(
+        { ok: true, id: data.id, service_type, time_spent_minutes: time_spent_minutes ?? null },
+        `Logged ${service_type} service call for contact ${contact_id} — ID: ${data.id}${time_spent_minutes ? ` (${time_spent_minutes} min)` : ""}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -61,11 +78,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "get_client_service_history",
   {
     title: "Get Client Service History",
-    description: "Retrieve service logs for an IT client, newest first.",
+    description:
+      "Retrieve service logs for an IT client, newest first.\n" +
+      "Use when: reviewing what was done for a client. Not for: unbilled-only across clients — use `get_unbilled_work`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { items, count } of service logs.",
     inputSchema: {
       contact_id: z.string().uuid().describe("Contact UUID"),
       limit: z.number().optional().default(20),
     },
+    outputSchema: listOf(ServiceLogSchema),
+    annotations: READ_ONLY,
   },
   async ({ contact_id, limit }) => {
     try {
@@ -75,15 +98,15 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .eq("contact_id", contact_id)
         .order("service_date", { ascending: false })
         .limit(limit ?? 20);
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: `No service logs found for contact ${contact_id}.` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      if (!data?.length) return structuredResult({ items: [], count: 0 }, `No service logs found for contact ${contact_id}.`);
 
       const lines = data.map((l) =>
         `• [${l.service_date}] ${l.service_type.toUpperCase()}${l.time_spent_minutes ? ` ${l.time_spent_minutes}min` : ""} ${l.billable ? (l.billed ? "[billed]" : "[unbilled]") : "[no-bill]"}\n  ${l.description}${l.resolution ? `\n  Resolution: ${l.resolution}` : ""}${l.follow_up_needed ? `\n  Follow-up: ${l.follow_up_notes ?? "needed"}` : ""}\n  ID: ${l.id}`
       );
-      return { content: [{ type: "text" as const, text: `${data.length} service log(s):\n\n${lines.join("\n\n")}` }] };
+      return structuredResult({ items: data, count: data.length }, `${data.length} service log(s):\n\n${lines.join("\n\n")}`);
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -93,10 +116,20 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "get_unbilled_work",
   {
     title: "Get Unbilled Work",
-    description: "List billable but unbilled service logs. Omit contact_id to see all clients.",
+    description:
+      "List billable-but-unbilled service logs (omit contact_id to see all clients).\n" +
+      "Use when: preparing invoices / finding what to bill. Not for: a client's full history — use `get_client_service_history`.\n" +
+      "Side effects: none; read only.\n" +
+      "Returns: { items, count, total_minutes } of unbilled logs (each carries its contact's name/company).",
     inputSchema: {
       contact_id: z.string().uuid().optional().describe("Filter to one client; omit for all"),
     },
+    outputSchema: {
+      items:         z.array(z.record(z.string(), z.unknown())),
+      count:         z.number().int(),
+      total_minutes: z.number().int(),
+    },
+    annotations: READ_ONLY,
   },
   async ({ contact_id }) => {
     try {
@@ -110,16 +143,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       if (contact_id) q = q.eq("contact_id", contact_id);
 
       const { data, error } = await q;
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: "No unbilled work found." }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      if (!data?.length) return structuredResult({ items: [], count: 0, total_minutes: 0 }, "No unbilled work found.");
 
       type LogRow = { id: string; contact_id: string; service_date: string; service_type: string; description: string; time_spent_minutes: number | null; professional_contacts: { name: string; company: string | null }[] };
       const byContact: Record<string, { name: string; logs: LogRow[]; totalMin: number }> = {};
+      let totalMinutes = 0;
       for (const l of data as LogRow[]) {
         const cid = l.contact_id;
         if (!byContact[cid]) byContact[cid] = { name: l.professional_contacts[0]?.name ?? cid, logs: [], totalMin: 0 };
         byContact[cid].logs.push(l);
         byContact[cid].totalMin += l.time_spent_minutes ?? 0;
+        totalMinutes += l.time_spent_minutes ?? 0;
       }
 
       const lines: string[] = [`Unbilled work (${data.length} logs across ${Object.keys(byContact).length} client(s)):\n`];
@@ -130,9 +165,9 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         }
         lines.push("");
       }
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      return structuredResult({ items: data, count: data.length, total_minutes: totalMinutes }, lines.join("\n"));
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -142,7 +177,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "create_billing_entry",
   {
     title: "Create Billing Entry",
-    description: "Create a billing entry and atomically mark all referenced service logs as billed via create_billing_entry_tx.",
+    description:
+      "Create a billing entry and atomically mark all referenced service logs as billed.\n" +
+      "Use when: invoicing a batch of unbilled logs. Not for: changing an invoice's status — use `update_billing_status`.\n" +
+      "Side effects: create_billing_entry_tx inserts the entry and flips the referenced logs to billed=true (transactional).\n" +
+      "Returns: { ok, id, amount, logs_billed }.",
     inputSchema: {
       contact_id: z.string().uuid(),
       service_log_ids: z.array(z.string().uuid()).describe("Service log UUIDs to include in this invoice"),
@@ -151,6 +190,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       invoice_date: z.string().optional().describe("ISO date YYYY-MM-DD"),
       notes: z.string().optional(),
     },
+    outputSchema: writeResult({
+      amount: z.number(),
+      logs_billed: z.number().int(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ contact_id, service_log_ids, amount, description, invoice_date, notes }) => {
     try {
@@ -163,10 +207,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         p_invoice_date: invoice_date ?? null,
         p_notes: notes ?? null,
       });
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      return { content: [{ type: "text" as const, text: `Created billing entry ID: ${data}\nMarked ${service_log_ids.length} log(s) as billed. Amount: $${amount}` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      return structuredResult(
+        { ok: true, id: data as string, amount, logs_billed: service_log_ids.length },
+        `Created billing entry ID: ${data}\nMarked ${service_log_ids.length} log(s) as billed. Amount: $${amount}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
@@ -176,12 +223,21 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   "update_billing_status",
   {
     title: "Update Billing Status",
-    description: "Update the status of a billing entry to 'sent' or 'paid'. Pass paid_date when marking paid.",
+    description:
+      "Update a billing entry's status to 'sent' or 'paid' (pass paid_date when marking paid).\n" +
+      "Use when: moving an invoice through its lifecycle. Not for: creating the invoice — use `create_billing_entry`.\n" +
+      "Side effects: updates the it_billing_entries row (transactional).\n" +
+      "Returns: { ok, id, status, paid_date }.",
     inputSchema: {
       billing_entry_id: z.string().uuid(),
       status: z.enum(["sent", "paid"]),
       paid_date: z.string().optional().describe("ISO date YYYY-MM-DD — required when status=paid"),
     },
+    outputSchema: writeResult({
+      status: z.string(),
+      paid_date: z.string().nullable(),
+    }),
+    annotations: WRITE_TRANSACTIONAL,
   },
   async ({ billing_entry_id, status, paid_date }) => {
     try {
@@ -192,10 +248,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         .from("it_billing_entries")
         .update(patch)
         .eq("id", billing_entry_id);
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      return { content: [{ type: "text" as const, text: `Updated billing entry ${billing_entry_id} → ${status}${paid_date ? ` (paid ${paid_date})` : ""}` }] };
+      if (error) return errorResult(`Error: ${error.message}`);
+      return structuredResult(
+        { ok: true, id: billing_entry_id, status, paid_date: paid_date ?? null },
+        `Updated billing entry ${billing_entry_id} → ${status}${paid_date ? ` (paid ${paid_date})` : ""}`,
+      );
     } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      return errorResult(`Error: ${(err as Error).message}`);
     }
   }
 );
