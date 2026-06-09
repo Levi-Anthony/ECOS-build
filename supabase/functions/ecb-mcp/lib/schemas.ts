@@ -123,7 +123,7 @@ export const ThoughtStatsSchema = {
 
 // ─── Artifacts (v2/v3) ───────────────────────────────────────────────────────
 
-/** Artifact manifest header — identity, version, review policy, metadata. */
+/** Artifact manifest header — identity, version, review policy, metadata, notes. */
 export const ArtifactManifestSchema = z.object({
   id: z.string(),
   key: z.string(),
@@ -133,6 +133,7 @@ export const ArtifactManifestSchema = z.object({
   review_policy: z.string().describe("live_audit | human_gate"),
   current_version: z.number().int(),
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  notes: z.string().nullable().optional().describe("Human standing annotation — context agents should read before editing this artifact"),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),
 });
@@ -152,13 +153,17 @@ export const ArtifactChangeProposalSchema = z.object({
   id: z.string(),
   artifact_id: z.string(),
   base_version: z.number().int(),
-  ops: z.array(z.record(z.string(), z.unknown())),
+  ops: z.array(z.record(z.string(), z.unknown())).optional(),
   summary: z.string(),
   proposer_actor_type: z.string(),
   proposer_actor_id: z.string().nullable().optional(),
-  review_policy_at_proposal: z.string(),
+  review_policy_at_proposal: z.string().nullable().optional(),
   status: z.string(),
   review_reason: z.string().nullable().optional(),
+  reviewed_by_type: z.string().nullable().optional(),
+  reviewed_by_id: z.string().nullable().optional(),
+  reviewed_at: z.string().nullable().optional(),
+  supersedes_proposal_id: z.string().uuid().nullable().optional(),
   applied_version: z.number().int().nullable().optional(),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),

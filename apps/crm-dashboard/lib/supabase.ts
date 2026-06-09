@@ -104,6 +104,7 @@ export type Artifact = {
   review_policy: "live_audit" | "human_gate";
   current_version: number;
   metadata?: Record<string, unknown> | null;
+  notes?: string | null;
   created_at: string;
   updated_at: string;
 };

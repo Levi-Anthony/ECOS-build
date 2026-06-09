@@ -78,7 +78,8 @@ SELECT ok(
 );
 
 SET LOCAL ROLE authenticated;
-SELECT set_config('request.jwt.claims', '{}', true);
+SELECT set_config('request.jwt.claim.sub', '', true);
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT throws_ok(
   $$SELECT public.get_current_artifact_human_authority_status()$$,
@@ -91,7 +92,7 @@ RESET ROLE;
 
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
-  email_confirmed_at, created_at, updated_at
+  confirmed_at, created_at, updated_at
 )
 VALUES (
   '21000000-0000-0000-0000-000000000002'::uuid,
@@ -107,10 +108,11 @@ VALUES (
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"21000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '21000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   public.get_current_artifact_human_authority_status(),
@@ -135,10 +137,11 @@ VALUES (
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"21000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '21000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   public.get_current_artifact_human_authority_status(),
@@ -160,10 +163,11 @@ WHERE user_id = '21000000-0000-0000-0000-000000000002'::uuid;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"21000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '21000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   public.get_current_artifact_human_authority_status(),
@@ -179,10 +183,11 @@ WHERE user_id = '21000000-0000-0000-0000-000000000002'::uuid;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"21000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '21000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   public.get_current_artifact_human_authority_status(),

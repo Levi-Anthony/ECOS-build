@@ -203,19 +203,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Save Handoff Snapshot",
       description:
-        "Compile and persist a handoff snapshot. Computes a 1536-d embedding from `content` " +
-        "via OpenRouter, then calls public.save_handoff_snapshot_tx which (a) takes a cluster-wide " +
-        "advisory lock, (b) flips the prior is_current snapshot to FALSE, and (c) inserts the new " +
-        "current snapshot in one transaction. Pass an empty source_event_ids[] to invoke the " +
-        "manual-override path: watermark falls back to the prior snapshot's watermark and metadata " +
-        "is tagged with a warning. Any unresolved UUID in source_event_ids aborts the entire " +
-        "transaction (no rows inserted, prior is_current preserved).\n" +
+        "Compile and persist a handoff snapshot. Calls public.save_handoff_snapshot_tx which " +
+        "(a) takes a cluster-wide advisory lock, (b) flips the prior is_current snapshot to FALSE, " +
+        "and (c) inserts the new current snapshot in one transaction. Pass an empty source_event_ids[] " +
+        "to invoke the manual-override path: watermark falls back to the prior snapshot's watermark " +
+        "and metadata is tagged with a warning. Any unresolved UUID in source_event_ids aborts the " +
+        "entire transaction (no rows inserted, prior is_current preserved). No embedding is computed.\n" +
         "Use when: closing a session / writing authoritative resume state. Not for: a single event — use `append_handoff_event`.\n" +
-        "Side effects: embeds content, flips prior is_current → false, inserts the new current snapshot (transactional).\n" +
+        "Side effects: flips prior is_current → false, inserts the new current snapshot (transactional).\n" +
         "Returns: { snapshot } with watermark + is_current; metadata_warning_present=true on the manual-override path.",
       inputSchema: {
         content: z.string().min(1)
-          .describe("Compiled handoff content. Will be embedded synchronously and stored verbatim."),
+          .describe("Compiled handoff content. Stored verbatim."),
         source_event_ids: z.array(z.string().uuid()).optional().default([])
           .describe("UUIDs of handoff_events that contributed to this snapshot. " +
                     "Empty/omitted = manual-override path."),
@@ -241,25 +240,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     },
     async ({ content, source_event_ids, session_id, metadata, client_request_id }) => {
       try {
-        const vec = await helpers.getEmbedding(content);
-        if (!Array.isArray(vec) || vec.length !== 1536) {
-          return errorResult(
-            `save_handoff_snapshot: embedding shape invalid ` +
-            `(expected 1536-d array, got ${Array.isArray(vec) ? `length ${vec.length}` : typeof vec})`,
-            "UPSTREAM",
-          );
-        }
-        // pgvector accepts the canonical text literal '[v1,v2,...]'. JSON.stringify yields the
-        // same shape, but we use join(",") so we never accidentally serialize NaN/Infinity tokens
-        // (JSON.stringify would emit `null` for those; vector parser would reject).
-        const embeddingLiteral = `[${vec.join(",")}]`;
-
         const { data, error } = await supabase.rpc("save_handoff_snapshot_tx", {
           p_compiled_by:        "ecb-mcp.save_handoff_snapshot",
           p_source_session_id:  session_id ?? null,
           p_source_event_ids:   source_event_ids ?? [],
           p_content:            content,
-          p_embedding:          embeddingLiteral,
           p_metadata:           metadata ?? {},
           p_client_request_id:  client_request_id ?? null,
         });

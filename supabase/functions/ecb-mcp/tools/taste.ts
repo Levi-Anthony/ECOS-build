@@ -187,7 +187,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
   {
     title: "List Taste Preferences",
     description:
-      "List taste preferences (active first, then by invocation_count DESC, then most recent), with optional filters.\n" +
+      "List taste preferences (active first, then by invocation_count DESC, then most recent), with optional filters. Each preference is also mirrored as a thought with signal_type='taste' for semantic surfacing via `search_thoughts`.\n" +
       "Use when: retrieving the operative taste profile before a session or finding refinement candidates. Not for: capturing a new one — use `capture_taste_preference`.\n" +
       "Side effects: none; read only.\n" +
       "Returns: { items, count } of taste preferences.",

@@ -55,6 +55,7 @@ interface ArtifactRow {
   review_policy: string;
   current_version: number;
   metadata: Record<string, unknown>;
+  notes: string | null;
   updated_at: string;
 }
 
@@ -129,12 +130,14 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       description:
         "Bundled read returning everything needed to boot a desktop or mobile session: " +
         "latest handoff snapshot, recent pulse entries (last 20), derived orientation, " +
-        "boot artifacts (v2 artifacts tagged 'boot'), and server time. " +
+        "boot artifacts (v2 artifacts tagged 'boot'), pending artifact proposals awaiting " +
+        "human review (so agents don't need to remember to poll), recently resolved proposals " +
+        "(last 7 days), and server time. " +
         "Any sub-fetch failure degrades that field to null/[] but the call still succeeds. " +
         "Client decides what is enough to boot.\n" +
         "Use when: cold-starting or resuming a session (one round-trip). Not for: targeted reads — use the specific read tool.\n" +
         "Side effects: none; read only.\n" +
-        "Returns: { handoff_snapshot, recent_pulse, derived_orientation, boot_artifacts, server_time, degraded_hints } — degraded_hints is non-null only when a sub-fetch failed.",
+        "Returns: { handoff_snapshot, recent_pulse, derived_orientation, boot_artifacts, pending_proposals, recently_resolved_proposals, server_time, degraded_hints }.",
       inputSchema: {
         surface:    z.string().describe("Calling surface: desktop | mobile | shortcut | cron"),
         session_id: z.string().optional().describe("New session UUID — used to scope pulse since filter"),
@@ -152,6 +155,23 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
           content_md:       z.string(),
         }),
         boot_artifacts: z.array(z.record(z.string(), z.unknown())),
+        pending_proposals: z.array(z.object({
+          id:           z.string(),
+          artifact_id:  z.string(),
+          status:       z.string(),
+          summary:      z.string().nullable().optional(),
+          review_reason: z.string().nullable().optional(),
+          updated_at:   z.string().nullable().optional(),
+        })).nullable(),
+        recently_resolved_proposals: z.array(z.object({
+          id:             z.string(),
+          artifact_id:    z.string(),
+          status:         z.string(),
+          summary:        z.string().nullable().optional(),
+          review_reason:  z.string().nullable().optional(),
+          applied_version: z.number().int().nullable().optional(),
+          updated_at:     z.string().nullable().optional(),
+        })).nullable(),
         server_time:    z.string(),
         degraded_hints: z.record(z.string(), z.unknown()).nullable(),
       },
@@ -214,7 +234,7 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       try {
         const { data, error } = await supabase
           .from("artifacts")
-          .select("id, key, title, kind, status, review_policy, current_version, metadata, updated_at")
+          .select("id, key, title, kind, status, review_policy, current_version, metadata, notes, updated_at")
           .contains("metadata", { tags: ["boot"] }) // metadata @> '{"tags":["boot"]}'
           .eq("status", "active")
           .order("updated_at", { ascending: false });
@@ -232,6 +252,7 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
               target_runtime: m.target_runtime ?? null,
               summary: m.summary ?? null,
               tags: m.tags ?? [],
+              notes: a.notes ?? null,
               updated_at: a.updated_at,
             };
           });
@@ -240,10 +261,46 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
         degraded.boot_artifacts_error = (err as Error).message;
       }
 
-      // ── 4. Derived orientation (inline, V1) ────────────────────────────────
+      // ── 4. Pending + recently resolved proposals ──────────────────────────
+      // Surfaces proposal feedback to agents at boot so they don't need to poll.
+      type ProposalRow = { id: string; artifact_id: string; status: string; summary: string | null; review_reason: string | null; applied_version: number | null; updated_at: string | null };
+      let pendingProposals: ProposalRow[] = [];
+      let recentlyResolvedProposals: ProposalRow[] = [];
+      try {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const [pendingRes, resolvedRes] = await Promise.all([
+          supabase
+            .from("artifact_change_proposals")
+            .select("id, artifact_id, status, summary, review_reason, applied_version, updated_at")
+            .in("status", ["pending", "revision_requested"])
+            .order("updated_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("artifact_change_proposals")
+            .select("id, artifact_id, status, summary, review_reason, applied_version, updated_at")
+            .in("status", ["approved", "rejected"])
+            .gte("updated_at", sevenDaysAgo)
+            .order("updated_at", { ascending: false })
+            .limit(10),
+        ]);
+        if (pendingRes.error) {
+          degraded.pending_proposals_error = pendingRes.error.message;
+        } else {
+          pendingProposals = (pendingRes.data ?? []) as ProposalRow[];
+        }
+        if (resolvedRes.error) {
+          degraded.resolved_proposals_error = resolvedRes.error.message;
+        } else {
+          recentlyResolvedProposals = (resolvedRes.data ?? []) as ProposalRow[];
+        }
+      } catch (err: unknown) {
+        degraded.proposals_error = (err as Error).message;
+      }
+
+      // ── 5. Derived orientation (inline, V1) ────────────────────────────────
       const derivedOrientation = deriveOrientation(snapshot, recentPulse);
 
-      // ── 5. Handoff event lag count since watermark ─────────────────────────
+      // ── 6. Handoff event lag count since watermark ─────────────────────────
       if (snapshot) {
         try {
           const { count } = await supabase
@@ -259,12 +316,14 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
 
       // ── Bundle ─────────────────────────────────────────────────────────────
       const payload = {
-        handoff_snapshot:    snapshot,
-        recent_pulse:        recentPulse,
-        derived_orientation: derivedOrientation,
-        boot_artifacts:      bootArtifacts,
-        server_time:         new Date().toISOString(),
-        degraded_hints:      Object.keys(degraded).length > 0 ? degraded : null,
+        handoff_snapshot:              snapshot,
+        recent_pulse:                  recentPulse,
+        derived_orientation:           derivedOrientation,
+        boot_artifacts:                bootArtifacts,
+        pending_proposals:             pendingProposals.length > 0 ? pendingProposals : null,
+        recently_resolved_proposals:   recentlyResolvedProposals.length > 0 ? recentlyResolvedProposals : null,
+        server_time:                   new Date().toISOString(),
+        degraded_hints:                Object.keys(degraded).length > 0 ? degraded : null,
       };
 
       return structuredResult(payload, JSON.stringify(payload, null, 2));

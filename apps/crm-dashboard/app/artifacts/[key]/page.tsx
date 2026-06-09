@@ -4,9 +4,14 @@ import { relativeAge } from "@/lib/logic";
 import { ActionFeedbackBanner, ReviewHeader, chipClass, type ReviewChip, type ReviewField } from "@/lib/review-ui";
 import { Markdown } from "@/lib/markdown";
 import { CopyButton } from "@/lib/copy-button";
-import { editArtifactBlockAction, updateArtifactGovernanceAction } from "@/app/artifacts/actions";
+import { editArtifactBlockAction, updateArtifactGovernanceAction, setArtifactNotesAction } from "@/app/artifacts/actions";
 import { readArtifactActionFeedback } from "@/lib/artifact-action-feedback";
-import { getHumanAuthorityConfiguration } from "@/lib/human-authority";
+import {
+  ARTIFACT_AUTHORITY_LEVELS,
+  ARTIFACT_LIFECYCLE_STATUSES,
+  ARTIFACT_REVIEW_POLICIES,
+} from "@/lib/artifact-governance";
+import { getHumanAuthorityReadiness, humanAuthorityReadinessMessage } from "@/lib/human-authority";
 import { formatArtifactTag, sortArtifactTags } from "@/lib/artifact-browser";
 import { notFound } from "next/navigation";
 
@@ -46,11 +51,11 @@ export default async function ArtifactDetailPage({
   const key = decodeURIComponent(encodedKey);
   const actionFeedback = readArtifactActionFeedback(actionParams);
   const canonicalHref = `/artifacts/${encodeURIComponent(key)}`;
-  const humanAuthority = getHumanAuthorityConfiguration();
+  const humanAuthorityStatus = await getHumanAuthorityReadiness();
 
   const { data: artifactRow, error } = await supabase
     .from("artifacts")
-    .select("id, key, title, kind, status, review_policy, current_version, metadata, created_at, updated_at")
+    .select("id, key, title, kind, status, review_policy, current_version, metadata, notes, created_at, updated_at")
     .eq("key", key)
     .maybeSingle();
 
@@ -194,12 +199,10 @@ export default async function ArtifactDetailPage({
 
       {actionFeedback && <ActionFeedbackBanner {...actionFeedback} clearHref={canonicalHref} />}
 
-      {!humanAuthority.configured && (
+      {humanAuthorityStatus !== "ready" && (
         <section role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
           <p className="text-xs font-semibold uppercase tracking-wide">Human editing unavailable</p>
-          <p className="text-sm mt-1">
-            This runtime is missing: <span className="font-mono text-xs">{humanAuthority.missing.join(", ")}</span>.
-          </p>
+          <p className="text-sm mt-1">{humanAuthorityReadinessMessage(humanAuthorityStatus)}</p>
         </section>
       )}
 
@@ -257,7 +260,7 @@ export default async function ArtifactDetailPage({
           <label className="text-sm text-gray-700">
             <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Authority</span>
             <select name="authority_level" defaultValue={authorityLevel ?? "evidence"} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
-              {["evidence", "draft", "proposed_instruction", "approved_instruction", "policy"].map((value) => (
+              {ARTIFACT_AUTHORITY_LEVELS.map((value) => (
                 <option key={value} value={value}>{value.replaceAll("_", " ")}</option>
               ))}
             </select>
@@ -265,14 +268,15 @@ export default async function ArtifactDetailPage({
           <label className="text-sm text-gray-700">
             <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Lifecycle</span>
             <select name="status" defaultValue={artifact.status} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
-              {["active", "draft", "archived", "superseded"].map((value) => <option key={value}>{value}</option>)}
+              {ARTIFACT_LIFECYCLE_STATUSES.map((value) => <option key={value}>{value}</option>)}
             </select>
           </label>
           <label className="text-sm text-gray-700">
             <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">Review policy</span>
             <select name="review_policy" defaultValue={artifact.review_policy} className="min-h-10 w-full rounded-lg border border-gray-200 px-3">
-              <option value="live_audit">live audit</option>
-              <option value="human_gate">human gate</option>
+              {ARTIFACT_REVIEW_POLICIES.map((value) => (
+                <option key={value} value={value}>{value.replaceAll("_", " ")}</option>
+              ))}
             </select>
           </label>
           <label className="sm:col-span-3 text-sm text-gray-700">
@@ -281,7 +285,7 @@ export default async function ArtifactDetailPage({
           </label>
           <div className="sm:col-span-3">
             <button
-              disabled={!humanAuthority.configured}
+              disabled={humanAuthorityStatus !== "ready"}
               className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               Apply human governance change
@@ -289,6 +293,36 @@ export default async function ArtifactDetailPage({
             <p className="text-xs text-gray-400 mt-2">Creates a new accepted version only when a field changes. Stale forms are rejected.</p>
           </div>
         </form>
+      </details>
+
+      <details className="bg-white rounded-lg border border-gray-200 mb-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-gray-900">
+          Human notes
+          <span className="text-xs font-normal text-gray-400">standing context for agents and reviewers</span>
+        </summary>
+        <div className="border-t border-gray-100 p-4">
+          {artifact.notes && (
+            <p className="text-sm text-gray-700 leading-relaxed mb-4 whitespace-pre-wrap">{artifact.notes}</p>
+          )}
+          <form action={setArtifactNotesAction} className="space-y-3">
+            <input type="hidden" name="key" value={artifact.key} />
+            <textarea
+              name="notes"
+              rows={4}
+              defaultValue={artifact.notes ?? ""}
+              placeholder="Standing context for agents and reviewers — e.g. 'Always gate this; see 2026-05-15 incident.' Saved as-is; does not create a revision."
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            />
+            <button
+              type="submit"
+              disabled={humanAuthorityStatus !== "ready"}
+              className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              Save notes
+            </button>
+            <p className="text-xs text-gray-400">Notes are out-of-band human commentary. They do not create an artifact_revisions row. Clear the field to remove.</p>
+          </form>
+        </div>
       </details>
 
       <details className="lg:hidden bg-white rounded-lg border border-gray-200 mb-6">
@@ -413,7 +447,7 @@ export default async function ArtifactDetailPage({
                         </label>
                         <button
                           type="submit"
-                          disabled={!humanAuthority.configured}
+                          disabled={humanAuthorityStatus !== "ready"}
                           className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
                           Save new accepted version

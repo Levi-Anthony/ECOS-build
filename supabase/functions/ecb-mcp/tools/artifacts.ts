@@ -136,7 +136,7 @@ function deriveTitle(path: string): string {
   return seg.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
-interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; created_at: string; updated_at: string }
+interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; notes: string | null; created_at: string; updated_at: string }
 interface BlockRow { id: string; artifact_id: string; path: string; title: string | null; content: string; content_hash: string; version: number; sort_order: number; metadata: Record<string, unknown>; updated_at: string }
 
 async function getArtifactByKey(supabase: Supa, key: string): Promise<ArtifactRow | null> {
@@ -329,7 +329,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       description:
         "Create a durable, addressable artifact with a stable key and optional initial blocks.\n" +
         "Use when: a new governed document/spec/tracker should exist. Not for: editing an existing artifact — use `patch_artifact`; full-body import — use `replace_artifact_body`.\n" +
-        "Side effects: inserts the artifact + blocks and generates block embeddings (append). Authority-sensitive agent-created artifacts begin as human-gated drafts and cannot self-promote.\n" +
+        "Side effects: inserts the artifact + blocks and generates block embeddings (append). Artifacts with kind in (policy, agent_instruction, prompt, sop, protocol) or metadata.authority_level in (approved_instruction, policy) are auto-gated to review_policy='human_gate' and status='draft' — they cannot self-promote. authority_level is downgraded to 'proposed_instruction' at creation and stored as advisory metadata only; it does not gate reads or writes after creation.\n" +
         "Returns: { ok, id, key, version, status, review_policy, blocks_count } (version 1 if blocks provided, else 0).",
       inputSchema: {
         key:            z.string().describe("Stable unique identifier, e.g. ttc_governance_strategy"),
@@ -400,10 +400,10 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Get Artifact Manifest",
       description:
-        "Default first-read tool: artifact identity, current_version, metadata, and the block index (path/title/hash/version/updated_at) WITHOUT block content.\n" +
+        "Default first-read tool: artifact identity, current_version, metadata, notes (human standing annotations), and the block index (path/title/hash/version/updated_at) WITHOUT block content.\n" +
         "Use when: preparing a patch — the hashes and current_version feed `patch_artifact`. Not for: reading block bodies — use `get_artifact_block`; the compiled document — use `get_artifact_snapshot`.\n" +
         "Side effects: none; read only.\n" +
-        "Returns: { key, title, kind, status, review_policy, current_version, metadata, blocks[] } (block index only).",
+        "Returns: { key, title, kind, status, review_policy, current_version, metadata, notes, blocks[] } (block index only).",
       inputSchema: {
         key:              z.string(),
         include_archived: z.boolean().optional().default(false),
@@ -416,6 +416,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         review_policy:   z.string(),
         current_version: z.number().int(),
         metadata:        z.record(z.string(), z.unknown()).nullable().optional(),
+        notes:           z.string().nullable().optional().describe("Human standing annotation — context agents should read before editing this artifact"),
         blocks:          z.array(manifestBlockSchema),
       },
       annotations: READ_ONLY,
@@ -427,7 +428,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         const blocks = await loadBlocks(supabase, a.id, include_archived ?? false);
         const manifest = {
           key: a.key, title: a.title, kind: a.kind, status: a.status, review_policy: a.review_policy,
-          current_version: a.current_version, metadata: a.metadata,
+          current_version: a.current_version, metadata: a.metadata, notes: a.notes ?? null,
           blocks: blocks.map(b => ({
             path: b.path, title: b.title ?? deriveTitle(b.path),
             hash: b.content_hash, version: b.version, sort_order: b.sort_order,
@@ -498,7 +499,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       description:
         "Normal agent write path: apply an atomic, block-level patch with optimistic concurrency. Never rewrite a whole document.\n" +
         "Use when: making a scoped edit to an existing artifact. Not for: creating one — use `create_artifact`; full-body import/repair — use `replace_artifact_body`; review-only staging — use `propose_artifact_patch`.\n" +
-        "Side effects: applies immediately for live_audit artifacts (one immutable revision + changed-block re-embedding); for human_gate artifacts and any authority/lifecycle/review-policy op it instead opens a pending proposal and changes NOTHING. Existing-block ops require expected_hash.\n" +
+        "Side effects: applies immediately for live_audit artifacts (one immutable revision + changed-block re-embedding); for human_gate artifacts and any op that changes authority/lifecycle/review_policy it instead opens a pending proposal and changes NOTHING. Existing-block ops require expected_hash. NOTE: review_policy='human_gate' is the actual routing gate — authority_level in metadata is advisory only and does not affect routing.\n" +
         "Returns: { applied, ... } — applied=true with new_version/changed_paths, or applied=false with proposal_id when routed to review.",
       inputSchema: {
         key:             z.string(),
@@ -948,7 +949,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           artifactId = artifact.id;
         }
         let q = supabase.from("artifact_change_proposals")
-          .select("id, artifact_id, base_version, summary, proposer_actor_type, proposer_actor_id, status, review_reason, applied_version, created_at, updated_at")
+          .select("id, artifact_id, base_version, summary, proposer_actor_type, proposer_actor_id, status, review_reason, reviewed_by_type, reviewed_by_id, reviewed_at, supersedes_proposal_id, applied_version, created_at, updated_at")
           .order("created_at", { ascending: false })
           .limit(limit ?? 20);
         if (status) q = q.eq("status", status);

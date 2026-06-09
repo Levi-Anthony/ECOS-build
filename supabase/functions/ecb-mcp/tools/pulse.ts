@@ -69,14 +69,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Log Pulse",
       description:
-        "Append an in-session pulse entry. Computes a 1536-d embedding from `content` " +
-        "synchronously via OpenRouter; on embedding failure no row is inserted (synchronous " +
-        "embedding policy, embedding column is NOT NULL). Append-only: never updates an " +
-        "existing row. Provide a `client_request_id` to make replays idempotent (unique " +
-        "partial index).\n" +
+        "Append an in-session pulse entry. Append-only: never updates an existing row. " +
+        "Provide a `client_request_id` to make replays idempotent (unique partial index). " +
+        "No embedding is computed — pulse entries are retrieved temporally, not semantically.\n" +
         "Use when: capturing a transient state/observation/block during a session. Not for: durable resume state — use `save_handoff_snapshot`; a memory atom — use `capture_thought`.\n" +
-        "Side effects: embeds content and inserts one pulse_entries row (append).\n" +
-        "Returns: { pulse } with id + embedding_dimension.",
+        "Side effects: inserts one pulse_entries row (append only).\n" +
+        "Returns: { pulse } with id and key fields.",
       inputSchema: {
         content: z.string().min(1)
           .describe("Pulse content. Will be embedded and stored verbatim."),
@@ -97,36 +95,24 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       },
       outputSchema: {
         pulse: z.object({
-          id:                  z.string(),
-          session_id:          z.string().nullable().optional(),
-          surface:             z.string().nullable().optional(),
-          pulse_type:          z.string().nullable().optional(),
-          occurred_at:         z.string().nullable().optional(),
-          created_at:          z.string().nullable().optional(),
-          client_request_id:   z.string().nullable().optional(),
-          embedding_dimension: z.number().int(),
+          id:                z.string(),
+          session_id:        z.string().nullable().optional(),
+          surface:           z.string().nullable().optional(),
+          pulse_type:        z.string().nullable().optional(),
+          occurred_at:       z.string().nullable().optional(),
+          created_at:        z.string().nullable().optional(),
+          client_request_id: z.string().nullable().optional(),
         }),
       },
       annotations: WRITE_APPEND,
     },
     async ({ content, pulse_type, session_id, surface, metadata, occurred_at, client_ts, client_request_id }) => {
       try {
-        const vec = await helpers.getEmbedding(content);
-        if (!Array.isArray(vec) || vec.length !== 1536) {
-          return errorResult(
-            `log_pulse: embedding shape invalid ` +
-            `(expected 1536-d array, got ${Array.isArray(vec) ? `length ${vec.length}` : typeof vec})`,
-            "UPSTREAM",
-          );
-        }
-        const embeddingLiteral = `[${vec.join(",")}]`;
-
         const row: Record<string, unknown> = {
           session_id: session_id ?? "mcp",
           surface:    surface    ?? "mcp",
           pulse_type,
           content,
-          embedding:  embeddingLiteral,
           metadata:   metadata   ?? {},
         };
         if (occurred_at)        row.occurred_at = occurred_at;
@@ -143,14 +129,13 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (!data)  return errorResult("log_pulse: insert returned no row");
 
         const pulse = {
-          id:                  data.id,
-          session_id:          data.session_id,
-          surface:             data.surface,
-          pulse_type:          data.pulse_type,
-          occurred_at:         data.occurred_at,
-          created_at:          data.created_at,
-          client_request_id:   data.client_request_id,
-          embedding_dimension: 1536,
+          id:                data.id,
+          session_id:        data.session_id,
+          surface:           data.surface,
+          pulse_type:        data.pulse_type,
+          occurred_at:       data.occurred_at,
+          created_at:        data.created_at,
+          client_request_id: data.client_request_id,
         };
         return structuredResult({ pulse }, JSON.stringify({ pulse }, null, 2));
       } catch (err: unknown) {

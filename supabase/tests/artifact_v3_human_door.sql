@@ -193,7 +193,7 @@ SELECT is(
 
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
-  email_confirmed_at, created_at, updated_at
+  confirmed_at, created_at, updated_at
 )
 VALUES (
   '20000000-0000-0000-0000-000000000002'::uuid,
@@ -216,10 +216,11 @@ VALUES (
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '20000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   review_artifact_change_tx(proposal_id, 'approve')->>'status',
@@ -269,10 +270,11 @@ WHERE a.id = state.artifact_id;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
-  'request.jwt.claims',
-  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  'request.jwt.claim.sub',
+  '20000000-0000-0000-0000-000000000002',
   true
 );
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 SELECT is(
   apply_artifact_human_patch_tx(

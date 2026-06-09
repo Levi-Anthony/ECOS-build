@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase-server";
 import { reindexArtifactPaths } from "@/lib/ecb-mcp";
 import {
+  getReadyHumanAuthorityClient,
+} from "@/lib/human-authority";
+import {
   artifactBlockContentHash,
   artifactHumanEditSummary,
   normalizeArtifactBlockContent,
@@ -15,6 +18,11 @@ import {
   artifactActionFeedbackHref,
   type ArtifactActionFeedback,
 } from "@/lib/artifact-action-feedback";
+import { buildArtifactGovernanceOps } from "@/lib/artifact-governance";
+import {
+  artifactKeyForReviewedProposal,
+  type ArtifactReviewResolutionClient,
+} from "@/lib/artifact-review-resolution";
 import type { ArtifactPatchOp } from "@/lib/supabase";
 
 const required = (formData: FormData, key: string): string => {
@@ -61,12 +69,13 @@ export async function editArtifactBlockAction(formData: FormData) {
         message: "No content changed, so no new version was created.",
       };
     } else {
-      const { data, error } = await supabase.rpc("apply_artifact_dashboard_patch_tx", {
+      const human = await getReadyHumanAuthorityClient();
+      const { data, error } = await human.rpc("apply_artifact_human_patch_tx", {
         p_key: key,
         p_base_version: baseVersion,
         p_ops: [{ op: "replace_block", path, expected_hash: expectedHash, content }],
         p_summary: reason,
-        p_source_refs: { surface: "crm-dashboard", action: "direct_block_edit", gate: "dashboard_basic_auth" },
+        p_source_refs: { surface: "crm-dashboard", action: "direct_block_edit", gate: "human_authority" },
       });
       if (error) throw new Error(error.message);
       const result = data as { new_version?: number; changed_paths?: string[] };
@@ -91,11 +100,14 @@ export async function updateArtifactGovernanceAction(formData: FormData) {
     const status = required(formData, "status");
     const reviewPolicy = required(formData, "review_policy");
     const authority = required(formData, "authority_level");
-    const ops: ArtifactPatchOp[] = [];
-
-    if (status !== currentStatus) ops.push({ op: "set_artifact_status", status });
-    if (reviewPolicy !== currentReviewPolicy) ops.push({ op: "set_review_policy", review_policy: reviewPolicy as "live_audit" | "human_gate" });
-    if (authority !== currentAuthority) ops.push({ op: "update_artifact_metadata", metadata_patch: { authority_level: authority } });
+    const ops = buildArtifactGovernanceOps({
+      currentStatus,
+      status,
+      currentReviewPolicy,
+      reviewPolicy,
+      currentAuthority,
+      authority,
+    });
 
     if (ops.length === 0) {
       feedback = {
@@ -104,12 +116,13 @@ export async function updateArtifactGovernanceAction(formData: FormData) {
         message: "No governance fields changed, so no new version was created.",
       };
     } else {
-      const { data, error } = await supabase.rpc("apply_artifact_dashboard_patch_tx", {
+      const human = await getReadyHumanAuthorityClient();
+      const { data, error } = await human.rpc("apply_artifact_human_patch_tx", {
         p_key: key,
         p_base_version: baseVersion,
         p_ops: ops,
         p_summary: reason,
-        p_source_refs: { surface: "crm-dashboard", action: "governance_update", gate: "dashboard_basic_auth" },
+        p_source_refs: { surface: "crm-dashboard", action: "governance_update", gate: "human_authority" },
       });
       if (error) throw new Error(error.message);
       const result = data as { new_version?: number; changed_paths?: string[] };
@@ -122,10 +135,33 @@ export async function updateArtifactGovernanceAction(formData: FormData) {
   redirect(artifactActionFeedbackHref(`/artifacts/${encodeURIComponent(key)}`, feedback));
 }
 
+export async function setArtifactNotesAction(formData: FormData) {
+  const key = required(formData, "key");
+  let feedback: ArtifactActionFeedback;
+  try {
+    const notes = String(formData.get("notes") ?? "").trim();
+    const human = await getReadyHumanAuthorityClient();
+    const { error } = await human.rpc("set_artifact_notes_tx", {
+      p_key: key,
+      p_notes: notes || null,
+    });
+    if (error) throw new Error(error.message);
+    try {
+      revalidatePath("/artifacts");
+      revalidatePath(`/artifacts/${encodeURIComponent(key)}`);
+    } catch { /* non-blocking */ }
+    feedback = { result: "success", label: "Notes saved", message: "Artifact notes updated." };
+  } catch (error) {
+    feedback = { result: "error", label: "Notes save failed", message: artifactActionErrorMessage(error) };
+  }
+  redirect(artifactActionFeedbackHref(`/artifacts/${encodeURIComponent(key)}`, feedback));
+}
+
 export async function reviewArtifactProposalAction(formData: FormData) {
   const proposalId = required(formData, "proposal_id");
   let feedback: ArtifactActionFeedback;
   try {
+    const human = await getReadyHumanAuthorityClient();
     const action = required(formData, "action");
     const reason = String(formData.get("reason") ?? "").trim() || null;
     let replacementOps: ArtifactPatchOp[] | null = null;
@@ -137,7 +173,7 @@ export async function reviewArtifactProposalAction(formData: FormData) {
       replacementOps = parsed as ArtifactPatchOp[];
     }
 
-    const { data, error } = await supabase.rpc("review_artifact_dashboard_change_tx", {
+    const { data, error } = await human.rpc("review_artifact_change_tx", {
       p_proposal_id: proposalId,
       p_action: action,
       p_reason: reason,
@@ -149,20 +185,11 @@ export async function reviewArtifactProposalAction(formData: FormData) {
       status: string;
       patch_result?: { artifact_id?: string; new_version?: number; changed_paths?: string[] };
     };
-    let key: string | null = null;
-    if (result.patch_result?.artifact_id) {
-      const { data: artifact } = await supabase.from("artifacts")
-        .select("key").eq("id", result.patch_result.artifact_id).maybeSingle();
-      key = (artifact as { key?: string } | null)?.key ?? null;
-    } else {
-      const { data: proposal } = await supabase.from("artifact_change_proposals")
-        .select("artifact_id").eq("id", proposalId).maybeSingle();
-      if (proposal) {
-        const { data: artifact } = await supabase.from("artifacts")
-          .select("key").eq("id", (proposal as { artifact_id: string }).artifact_id).maybeSingle();
-        key = (artifact as { key?: string } | null)?.key ?? null;
-      }
-    }
+    const key = await artifactKeyForReviewedProposal(
+      supabase as unknown as ArtifactReviewResolutionClient,
+      proposalId,
+      result.patch_result?.artifact_id,
+    );
 
     const warnings = key ? await finishArtifactWrite(key, result.patch_result?.changed_paths ?? []) : [];
     revalidatePath(`/artifacts/review/${proposalId}`);
