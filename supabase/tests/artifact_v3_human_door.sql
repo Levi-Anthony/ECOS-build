@@ -193,7 +193,7 @@ SELECT is(
 
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
-  confirmed_at, created_at, updated_at
+  email_confirmed_at, created_at, updated_at
 )
 VALUES (
   '20000000-0000-0000-0000-000000000002'::uuid,
