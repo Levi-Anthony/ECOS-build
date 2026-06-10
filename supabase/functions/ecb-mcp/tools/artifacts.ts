@@ -329,7 +329,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       description:
         "Create a durable, addressable artifact with a stable key and optional initial blocks.\n" +
         "Use when: a new governed document/spec/tracker should exist. Not for: editing an existing artifact — use `patch_artifact`; full-body import — use `replace_artifact_body`.\n" +
-        "Side effects: inserts the artifact + blocks and generates block embeddings (append). Artifacts with kind in (policy, agent_instruction, prompt, sop, protocol) or metadata.authority_level in (approved_instruction, policy) are auto-gated to review_policy='human_gate' and status='draft' — they cannot self-promote. authority_level is downgraded to 'proposed_instruction' at creation and stored as advisory metadata only; it does not gate reads or writes after creation.\n" +
+        "Side effects: inserts the artifact + blocks and generates block embeddings (append). Every agent-created artifact is born status='draft', review_policy='human_gate' and cannot self-promote — promotion to active flows only through the gated patch path (set_artifact_status / set_review_policy, which routes to human review). For kind in (policy, agent_instruction, prompt, sop, protocol) or metadata.authority_level in (approved_instruction, policy), authority_level is additionally downgraded to 'proposed_instruction' at creation and stored as advisory metadata only; it does not gate reads or writes after creation.\n" +
         "Returns: { ok, id, key, version, status, review_policy, blocks_count } (version 1 if blocks provided, else 0).",
       inputSchema: {
         key:            z.string().describe("Stable unique identifier, e.g. ttc_governance_strategy"),
