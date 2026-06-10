@@ -32,7 +32,7 @@ CREATE OR REPLACE FUNCTION public.save_handoff_snapshot_tx(
   p_source_event_ids   uuid[],
   p_content            text,
   p_embedding          extensions.vector(1536) DEFAULT NULL,
-  p_metadata           jsonb,
+  p_metadata           jsonb DEFAULT '{}'::jsonb,
   p_client_request_id  text DEFAULT NULL
 )
 RETURNS TABLE (
