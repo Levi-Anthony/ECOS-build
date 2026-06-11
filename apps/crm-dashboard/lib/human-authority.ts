@@ -35,10 +35,11 @@ export function getHumanAuthorityConfiguration(): { configured: boolean; missing
 }
 
 async function authenticateHumanAuthorityClient(): Promise<SupabaseClient> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY;
-  const email = process.env.HUMAN_AUTH_EMAIL;
-  const password = process.env.HUMAN_AUTH_PASSWORD;
+  // Trim to defend against stray whitespace/newlines in env values (e.g. from `echo | vercel env add`).
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  const email = process.env.HUMAN_AUTH_EMAIL?.trim();
+  const password = process.env.HUMAN_AUTH_PASSWORD?.trim();
 
   if (!getHumanAuthorityConfiguration().configured || !supabaseUrl || !anonKey || !email || !password) {
     throw new Error("Human authority path is not configured");
