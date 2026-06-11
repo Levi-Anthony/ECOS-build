@@ -52,7 +52,10 @@ async function authenticateHumanAuthorityClient(): Promise<SupabaseClient> {
     },
   });
   const { error } = await client.auth.signInWithPassword({ email, password });
-  if (error) throw new Error("HUMAN_AUTHORITY_AUTHENTICATION_FAILED");
+  if (error) {
+    console.error("[human-authority] signInWithPassword failed", { code: error.code, status: error.status, message: error.message });
+    throw new Error("HUMAN_AUTHORITY_AUTHENTICATION_FAILED");
+  }
   return client;
 }
 
