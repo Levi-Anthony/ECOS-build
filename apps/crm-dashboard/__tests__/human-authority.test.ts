@@ -84,6 +84,30 @@ describe("human authority readiness", () => {
     expect(client.rpc).toHaveBeenCalledWith("get_current_artifact_human_authority_status");
   });
 
+  it("trims surrounding whitespace/newlines in env values before authenticating", async () => {
+    // Regression: a trailing newline in HUMAN_AUTH_EMAIL (from `echo | vercel env add`)
+    // made signInWithPassword fail with invalid_credentials in production for ~6 days.
+    Object.assign(process.env, {
+      NEXT_PUBLIC_SUPABASE_URL: "  https://example.supabase.co  ",
+      SUPABASE_ANON_KEY: "anon-test-key\n",
+      HUMAN_AUTH_EMAIL: "reviewer@example.invalid\n",
+      HUMAN_AUTH_PASSWORD: "\ttest-password\n",
+    });
+    const client = mockClient();
+    const { getHumanAuthorityReadiness } = await loadModule();
+
+    await expect(getHumanAuthorityReadiness()).resolves.toBe("ready");
+    expect(mocks.createClient).toHaveBeenCalledWith(
+      "https://example.supabase.co",
+      "anon-test-key",
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
+    );
+    expect(client.auth.signInWithPassword).toHaveBeenCalledWith({
+      email: "reviewer@example.invalid",
+      password: "test-password",
+    });
+  });
+
   it("only returns a mutation client after a fresh ready self-status check", async () => {
     const client = mockClient();
     const { getReadyHumanAuthorityClient } = await loadModule();
