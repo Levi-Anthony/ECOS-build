@@ -82,6 +82,36 @@ export default async function ArtifactProposalDetail({
         </div>
       )}
 
+      {proposal.status === "conflicted" && (
+        <section className="rounded-lg border border-red-200 bg-red-50 p-4 mb-5 text-red-950">
+          <p className="text-xs font-semibold uppercase tracking-wide">Proposal conflicted — recovery path</p>
+          <p className="text-sm mt-1">
+            This proposal could not be applied because the artifact changed after it was proposed
+            (see the review reason above for the exact version/hash mismatch). It is now closed and
+            cannot be approved, edited, or retried from this page.
+          </p>
+          <p className="text-sm mt-2">To recover, do one of the following:</p>
+          <ul className="list-disc list-inside text-sm mt-1 space-y-1">
+            <li>
+              <a href={`/artifacts/${encodeURIComponent(artifact.key)}`} className="font-medium underline">
+                Open the current artifact
+              </a>{" "}
+              and make the equivalent edit directly against the current version/content — a direct
+              human edit is authoritative and does not need a proposal.
+            </li>
+            <li>
+              Or have the proposing agent re-read the current artifact state (current version{" "}
+              {artifact.current_version}) and submit a fresh <code className="font-mono text-xs">propose_artifact_patch</code>{" "}
+              with up-to-date <code className="font-mono text-xs">base_version</code> / <code className="font-mono text-xs">expected_hash</code> values.
+            </li>
+          </ul>
+          <p className="text-xs mt-2 text-red-800">
+            This proposal&apos;s original operations and review history remain on this page for reference —
+            nothing has been discarded.
+          </p>
+        </section>
+      )}
+
       <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Proposed changes</h2>
       <div className="space-y-5 mb-8">
         {proposal.ops.map((op, index) => {

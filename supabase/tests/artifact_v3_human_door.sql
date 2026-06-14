@@ -3,7 +3,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path = public, extensions, pg_temp;
 
-SELECT plan(19);
+SELECT plan(26);
 
 SELECT create_artifact_v2(
   'artifact_v3_gate_test',
@@ -312,6 +312,187 @@ SELECT is(
   'human|test-reviewer|direct_block_edit',
   'direct human edit revision records database-derived identity and source'
 );
+
+-- ── Proposal conflict / dead-end recovery (artifact_proposal_conflict_recovery) ─
+
+-- An archived (soft-deleted) block keeps its path and content_hash but is
+-- flagged metadata.status='archived'. A patch op that targets that path
+-- must fail as MISSING_PATH instead of silently writing into the invisible
+-- archived block.
+SELECT create_artifact_v2(
+  'artifact_v3_archived_block_test',
+  'Archived Block Test',
+  'note',
+  '{}'::jsonb,
+  '[{"path":"/body","content":"alpha"}]'::jsonb,
+  'agent:test',
+  '40000000-0000-0000-0000-000000000004'::uuid
+);
+
+-- create_artifact_v2 now births every artifact draft/human_gate (see
+-- create_artifact_draft_always); flip to live_audit/active so this test can
+-- exercise the agent patch path directly, which is orthogonal to the
+-- archived-block fix under test.
+UPDATE artifacts SET review_policy = 'live_audit', status = 'active'
+WHERE key = 'artifact_v3_archived_block_test';
+
+SELECT apply_artifact_agent_patch_tx(
+  'artifact_v3_archived_block_test',
+  1,
+  jsonb_build_array(jsonb_build_object(
+    'op', 'delete_block',
+    'path', '/body',
+    'expected_hash', (
+      SELECT b.content_hash FROM artifact_blocks b JOIN artifacts a ON a.id = b.artifact_id
+      WHERE a.key = 'artifact_v3_archived_block_test' AND b.path = '/body'
+    )
+  )),
+  'archive /body'
+);
+
+SELECT throws_matching(
+  format(
+    'SELECT apply_artifact_agent_patch_tx(%L, %s, %L::jsonb, %L)',
+    'artifact_v3_archived_block_test',
+    2,
+    jsonb_build_array(jsonb_build_object(
+      'op', 'replace_block',
+      'path', '/body',
+      'expected_hash', (
+        SELECT b.content_hash FROM artifact_blocks b JOIN artifacts a ON a.id = b.artifact_id
+        WHERE a.key = 'artifact_v3_archived_block_test' AND b.path = '/body'
+      ),
+      'content', 'should not land'
+    ))::text,
+    'attempt to replace an archived block'
+  ),
+  '^MISSING_PATH:',
+  'replace_block on an archived (soft-deleted) block is rejected as MISSING_PATH, not silently applied'
+);
+
+SELECT is(
+  (
+    SELECT b.content || '|' || COALESCE(b.metadata->>'status', '')
+    FROM artifact_blocks b JOIN artifacts a ON a.id = b.artifact_id
+    WHERE a.key = 'artifact_v3_archived_block_test' AND b.path = '/body'
+  ),
+  'alpha|archived',
+  'archived block content and status are unchanged after the rejected replace_block'
+);
+
+SELECT is(
+  apply_artifact_agent_patch_tx(
+    'artifact_v3_archived_block_test',
+    2,
+    jsonb_build_array(jsonb_build_object(
+      'op', 'update_block_metadata',
+      'path', '/body',
+      'expected_hash', (
+        SELECT b.content_hash FROM artifact_blocks b JOIN artifacts a ON a.id = b.artifact_id
+        WHERE a.key = 'artifact_v3_archived_block_test' AND b.path = '/body'
+      ),
+      'metadata_patch', jsonb_build_object('status', 'active')
+    )),
+    'undelete /body'
+  )->>'new_version',
+  '3',
+  'update_block_metadata remains the undelete path for an archived block'
+);
+
+-- A proposal that becomes 'conflicted' (artifact advanced past its
+-- base_version before it could be applied) can be superseded by a
+-- corrective proposal, closing the provenance-chain gap.
+SELECT create_artifact_v2(
+  'artifact_v3_supersede_conflicted_test',
+  'Supersede Conflicted Test',
+  'policy',
+  '{"authority_level":"approved_instruction"}'::jsonb,
+  '[{"path":"/body","content":"v1"}]'::jsonb,
+  'agent:test',
+  '50000000-0000-0000-0000-000000000005'::uuid
+);
+
+CREATE TEMP TABLE artifact_v3_supersede_state AS
+SELECT a.id AS artifact_id, b.content_hash AS hash_v1
+FROM artifacts a JOIN artifact_blocks b ON b.artifact_id = a.id AND b.path = '/body'
+WHERE a.key = 'artifact_v3_supersede_conflicted_test';
+
+ALTER TABLE artifact_v3_supersede_state ADD COLUMN proposal_a_id UUID;
+ALTER TABLE artifact_v3_supersede_state ADD COLUMN proposal_b_id UUID;
+GRANT SELECT ON artifact_v3_supersede_state TO service_role, authenticated;
+
+-- Proposal A: based on v1. It will go stale once proposal B is approved first.
+UPDATE artifact_v3_supersede_state
+SET proposal_a_id = (
+  SELECT (propose_artifact_patch_tx(
+    'artifact_v3_supersede_conflicted_test', 1,
+    jsonb_build_array(jsonb_build_object(
+      'op', 'replace_block', 'path', '/body', 'expected_hash', s.hash_v1, 'content', 'proposal A content'
+    )),
+    'proposal A', 'agent', 'agent-a'
+  )->>'proposal_id')::uuid
+  FROM artifact_v3_supersede_state s
+);
+
+-- Proposal B: also based on v1, approved first so the artifact advances to v2.
+UPDATE artifact_v3_supersede_state
+SET proposal_b_id = (
+  SELECT (propose_artifact_patch_tx(
+    'artifact_v3_supersede_conflicted_test', 1,
+    jsonb_build_array(jsonb_build_object(
+      'op', 'replace_block', 'path', '/body', 'expected_hash', s.hash_v1, 'content', 'proposal B content'
+    )),
+    'proposal B', 'agent', 'agent-b'
+  )->>'proposal_id')::uuid
+  FROM artifact_v3_supersede_state s
+);
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '20000000-0000-0000-0000-000000000002', true);
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+
+-- Approve B first: artifact advances to v2.
+SELECT is(
+  review_artifact_change_tx(proposal_b_id, 'approve')->>'status',
+  'approved',
+  'proposal B approves cleanly and advances the artifact to v2'
+)
+FROM artifact_v3_supersede_state;
+
+-- Approving A now conflicts: base_version 1 != current_version 2.
+SELECT is(
+  review_artifact_change_tx(proposal_a_id, 'approve')->>'status',
+  'conflicted',
+  'proposal A conflicts at apply time because the artifact already advanced'
+)
+FROM artifact_v3_supersede_state;
+
+RESET ROLE;
+
+-- Corrective proposal C supersedes the now-conflicted proposal A.
+SELECT lives_ok(
+  format(
+    $fmt$SELECT propose_artifact_patch_tx(
+      'artifact_v3_supersede_conflicted_test', 2,
+      jsonb_build_array(jsonb_build_object(
+        'op','replace_block','path','/body','expected_hash',
+        (SELECT content_hash FROM artifact_blocks WHERE artifact_id = %L AND path = '/body'),
+        'content','proposal C corrective content'
+      )),
+      'proposal C: corrective', 'agent', 'agent-c', '{}'::jsonb, %L::uuid
+    )$fmt$,
+    artifact_id, proposal_a_id
+  ),
+  'a corrective proposal can supersede a conflicted proposal'
+)
+FROM artifact_v3_supersede_state;
+
+SELECT is(
+  (SELECT status FROM artifact_change_proposals WHERE id = proposal_a_id),
+  'superseded',
+  'the conflicted proposal transitions to superseded once a corrective proposal supersedes it'
+)
+FROM artifact_v3_supersede_state;
 
 SELECT * FROM finish();
 ROLLBACK;

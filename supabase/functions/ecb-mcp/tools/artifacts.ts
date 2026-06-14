@@ -273,9 +273,12 @@ async function doCheckpoint(supabase: Supa, a: ArtifactRow, format: "markdown" |
 function formatPatchError(msg: string): string {
   if (msg.includes("VERSION_CONFLICT")) return `Patch rejected: ${msg.replace(/^.*VERSION_CONFLICT:\s*/, "")}. Fetch the manifest again and retry.`;
   if (msg.includes("HASH_CONFLICT")) return `Patch rejected: ${msg.replace(/^.*HASH_CONFLICT:\s*/, "")}`;
-  if (msg.includes("MISSING_PATH")) return `Patch rejected: ${msg.replace(/^.*MISSING_PATH:\s*/, "")}`;
+  if (msg.includes("MISSING_PATH")) return `Patch rejected: ${msg.replace(/^.*MISSING_PATH:\s*/, "")}. The block may have been deleted or renamed — re-fetch the manifest to find its current path, or drop this op.`;
   if (msg.includes("PATH_EXISTS")) return `Patch rejected: ${msg.replace(/^.*PATH_EXISTS:\s*/, "")}`;
   if (msg.includes("ARTIFACT_NOT_FOUND")) return `Patch rejected: ${msg.replace(/^.*ARTIFACT_NOT_FOUND:\s*/, "")}`;
+  if (msg.includes("SUPERSEDED_PROPOSAL_NOT_OPEN")) return `Proposal rejected: the proposal you asked to supersede (${msg.replace(/^.*SUPERSEDED_PROPOSAL_NOT_OPEN:\s*/, "")}) is no longer open (it was already approved, rejected, conflicted, or superseded). Resubmit without supersedes_proposal_id, or check list_artifact_change_proposals for the current open proposal.`;
+  if (msg.includes("PROPOSAL_CLOSED")) return `Proposal rejected: ${msg.replace(/^.*PROPOSAL_CLOSED:\s*/, "")}. This proposal has already been resolved and cannot be reviewed again.`;
+  if (msg.includes("PROPOSAL_NOT_FOUND")) return `Proposal rejected: ${msg.replace(/^.*PROPOSAL_NOT_FOUND:\s*/, "")}`;
   return `Patch rejected: ${msg}`;
 }
 
@@ -287,6 +290,7 @@ function patchErrorCode(msg: string): ErrorCode {
   if (msg.includes("MISSING_PATH")) return "MISSING_PATH";
   if (msg.includes("PATH_EXISTS")) return "PATH_EXISTS";
   if (msg.includes("ARTIFACT_NOT_FOUND")) return "NOT_FOUND";
+  if (msg.includes("SUPERSEDED_PROPOSAL_NOT_OPEN") || msg.includes("PROPOSAL_CLOSED") || msg.includes("PROPOSAL_NOT_FOUND")) return "VALIDATION";
   return "UPSTREAM";
 }
 
