@@ -1,6 +1,10 @@
 # ECOS Deployment Prompt
 *v0.1 — 2026-03-30*
 
+> **Repo-canonical note:** This file is GitHub-canonical for ECOS deployment procedure and
+> commands. ECB should store only pointers, summaries, or decision traces referencing this
+> file — not duplicated procedure text.
+
 Paste this into a Claude Code session. Claude Code does the deployment.
 You provide credentials when asked. That's it.
 
