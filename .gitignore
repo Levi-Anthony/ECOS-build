@@ -27,3 +27,5 @@ shots/
 .codex/
 .agents/
 AGENTS.md
+.vercel
+.env*.local

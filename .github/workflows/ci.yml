@@ -29,13 +29,18 @@ jobs:
 
   ecb-mcp:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions/ecb-mcp
     steps:
       - uses: actions/checkout@v6
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - run: deno check index.ts
-        working-directory: supabase/functions/ecb-mcp
+      # Tool-contract gate: every tool in EXPECTED_FULL_CONTRACT must declare a
+      # description, annotations, and a Zod outputSchema (see tools/CONVENTION.md).
+      - run: deno test --allow-env tools.test.ts
 
   secrets:
     runs-on: ubuntu-latest
