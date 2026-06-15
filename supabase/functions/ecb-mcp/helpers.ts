@@ -32,12 +32,15 @@ for (const name of REQUIRED_ENV) {
 function getSupabaseAdminKey(): string {
   const secretKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
   if (secretKeys) {
-    const parsed = JSON.parse(secretKeys) as Record<string, unknown>;
-    const defaultKey = parsed.default;
-    if (typeof defaultKey === "string" && defaultKey.length > 0) {
-      return defaultKey;
+    try {
+      const parsed = JSON.parse(secretKeys) as Record<string, unknown>;
+      const defaultKey = parsed.default;
+      if (typeof defaultKey === "string" && defaultKey.length > 0) {
+        return defaultKey;
+      }
+    } catch {
+      // fall through to legacy key below
     }
-    throw new Error("ecb-mcp: SUPABASE_SECRET_KEYS.default is missing or empty");
   }
 
   const legacyKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
