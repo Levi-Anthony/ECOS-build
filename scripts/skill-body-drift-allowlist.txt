@@ -1,0 +1,10 @@
+# Skill body diffs whose Codex/Claude differences are intentional projections.
+# Format: <skill-name> <sha256-of-stable-diff-output> <reason-token>
+brain 0cef4e44f52c84f4cb54c2c20389e75deb200583c5218fdbfe26506e84651c40 platform-specific-env-guidance
+ecos-boot ed35ec665672803ea1af7e16fdc2d11bae2563b1540a69c47f7ce8cf89c937e7 platform-specific-session-labels-and-skill-path
+ecos-close 0e1c3a8335f5b3d8145778e2bd952da3bfad98600e75e4b52d896951adee0576 platform-specific-instruction-file-name
+ecos-deep e6049d5ec2a4bd5615618618c579bceca489e48b2c4a2a3ac2ff1bdf3a4c5fda platform-specific-runtime-surface-map
+ecos-harvest d12dd6e825ec8434ac34dbe75b46b416410f7c266f695b0cec968bd036ff0905 platform-specific-session-labels
+ecos-pulse 7e9a911013fd221ffe439eb5ef526b837ad1186ef4ccdb65838a95408f3dc3cc platform-specific-session-labels-and-channel-paths
+life-engine 158cc95a237d4ebd1c4420de3c51e6537100e52c0e2d98ac197a6de445106185 platform-specific-session-labels-and-channel-paths
+music 42f5c5f2d9e0578bee6403a1b77dd4389283f8816e82e9864e8b6bf15553f2bc platform-specific-agent-label
