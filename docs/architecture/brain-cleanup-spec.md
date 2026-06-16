@@ -35,7 +35,7 @@ Bundled BRAIN entries produce compromise embeddings that sit between two semanti
 
 **In scope:**
 
-- All thoughts table entries with ID ≤ baseline ID
+- All thoughts table entries with `created_at` ≤ baseline timestamp
 - Atomicity audit via geometric split test per entry
 - Fragment drafting, C3 verification, and metadata re-derivation per fragment
 - Scaffold archival to thought_history with archived_reason: 'split'
@@ -132,7 +132,9 @@ Advance cursor
 3. Archive scaffold to thought_history — confirm
 4. Advance cursor
 
-If any step fails, the run halts. On resume, check thought_history for an existing split record on the entry before processing. If found, skip — already processed. This protects against double-processing from partial writes.
+If any step fails, the run halts. On resume, check thought_history for an existing split record on the entry before processing. If found, skip — already processed.
+
+**Idempotency gap:** because thought_history is written in step 3 (after the fragments in steps 1–2), a crash between steps 1–2 and step 3 leaves orphaned fragments with no split record. To prevent duplicate fragments on re-run, either: (a) execute steps 1–3 as a single atomic database transaction, or (b) before re-processing any entry, query thoughts for existing fragments referencing this scaffold and delete them before writing fresh ones.
 
 **Cursor advances only after all writes are confirmed.**
 
