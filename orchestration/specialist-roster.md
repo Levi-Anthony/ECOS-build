@@ -12,7 +12,7 @@
 - **Scope:** SIGMA atoms/worldviews, naming protocol application, primitive classification. Not ECOS operations.
 - **Load-bearing inputs:** SIGMA Architect launch prompt — **GAP: not in ECB** (consistent with inherited open loop #7). SIGMA content artifacts exist: `d911f2d5` (Definition & Articulation), `34863a0e` (Naming Protocol).
 - **Launch prompt:** **GAP** — must be captured before a clean SIGMA session.
-- **Status:** active open loops — two-door-principle reclassification (BRAIN primitive vs SIGMA atom), potential legibility-axiom, trinity test (ground/orient/constitute) against a TTC worked example.
+- **Status:** active open loops — two-door-principle reclassification (BRAIN primitive vs SIGMA atom), potential legibility-axiom, trinity test (ground/orient/constitute) against a **SIGMA-internal or hypothetical** worked example — **not TTC**. *(TTC is the downstream first-real-world usage test, run in a separate session; strictly out of the SIGMA sprint per Levi 2026-05-26.)*
 - **Escalate back if:** a SIGMA change would alter an ECOS operational invariant; a primitive's classification is contested.
 
 ### TTC Architecture Designer

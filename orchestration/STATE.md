@@ -1,27 +1,27 @@
 # STATE — Code Orchestrator Live Working State
 
-*Read first every session, after `get_boot_context`. Reconcile against ECB before acting. ECB is canonical; this is the working copy. Mirror = Orchestration State Ledger artifact (to be created).*
+*Read first every session, after `get_boot_context`. Reconcile against ECB before acting. ECB is canonical; this is the working copy. Mirror = Orchestration State Ledger artifact `0628e4f0`.*
 
-- **Last reconciled:** 2026-05-26 (first session)
-- **Canonical state-ref:** `snapshot:6ad1f3b9-9e18-4773-92e5-0c8a8f563d01@126` (2026-05-25 TTC B2 brief; 0 events since)
-- **Mode:** ACTIVE (first-session charter execution)
-- **ECB mirrors:** Orchestration Agent Contract artifact `30430694-d25e-49fe-8850-c5580b96a437` (approved_instruction) · ECOS/TTC Orchestration State Ledger artifact `0628e4f0-0953-4022-99f8-4eb064f062c4` (evidence)
+- **Last reconciled:** 2026-05-26 (boot — 2nd session; prior first-session charter closed)
+- **Canonical state-ref:** `snapshot:937c40f4-7ad2-4ef2-a154-b1cbce33cfa1@130` (2026-05-26 Code Orchestrator first-session close; 0 events since)
+- **Mode:** ACTIVE (booted, oriented; awaiting Levi direction). First-session charter **COMPLETE**.
+- **ECB mirrors:** Orchestration Agent Contract `30430694` (approved_instruction) · ECOS/TTC Orchestration State Ledger `0628e4f0` (evidence) — *ledger pending reconciliation to @130; proposed this boot, awaiting Levi.*
 
 ## Priority queue (work in flight · owner · state)
 | # | Item | Owner | State |
 |---|---|---|---|
-| 1 | TTC §10-11430(B)(2) validity brief — routing decision (attorney / research agent / both) | **Levi** | Built, awaiting decision |
+| 1 | TTC §10-11430(B)(2) validity brief — routing decision (attorney / research agent / both) | **Levi** | Built, awaiting decision — **highest-leverage open item** |
 | 2 | Convention / established-practice brief | Specialist | Scoped, unwritten |
 | 3 | Durable supersession structured-field (ECB MCP, spec `325b3183`) | Code/infra | Carried, unresolved |
 | 4 | `ecbrain-v1` (7 commits ahead of `main`) — merge decision | **Levi** | Awaiting review/merge |
-| 5 | Code Orchestrator first-session charter | CO | **In execution** — files written + corrected (Levi A/B); ECB writes in progress; commit + snapshot pending |
+| 5 | Code Orchestrator first-session charter | CO | ✅ **COMPLETE** 2026-05-26 — 6 files committed (`dd4e6c7`, on `main`, off `ecbrain-v1`); contract `30430694` activated; ledger `0628e4f0` created; snapshot `@130` saved. *(drop from queue next reconciliation)* |
 
 ## Decision queue (awaiting Levi)
-- Routing of the TTC (B)(2) brief (item 1 above).
-- ~~Confirm ECB write payloads~~ → RESOLVED 2026-05-26: Levi chose write-all + activate contract.
+- Routing of the TTC (B)(2) brief (item 1 above) — **lead operational decision**.
 - Optional propagation step: add an "instance-of-core-pair" cross-reference to the TTC-email artifacts `65ab2668` / `ecdc2117` (propose-before-edit).
-- Git: direct-to-`main` vs short-lived `orchestration-setup` branch for `orchestration/`.
-- Capture SIGMA Architect launch prompt + TTC workspace rubric (roster gaps) — when?
+- ~~Git: direct-to-`main` vs short-lived `orchestration-setup` branch~~ → RESOLVED 2026-05-26: direct-to-`main`, committed `dd4e6c7` (off `ecbrain-v1`).
+- Capture SIGMA Architect launch prompt + TTC workspace rubric (roster GAPs) — when?
+- **NEW (this boot):** approve ledger artifact `0628e4f0` reconciliation to `@130` (proposed; reconciles the ECB mirror to the local working copy + snapshot).
 
 ## Review queue (drafts / outputs pending review)
 - #10 Connected Memory Operationalization Addendum — `4ec3fb2a` (parked mid-review).
@@ -29,12 +29,15 @@
 - Operational Kernel — ECB-First Retrieval Amendment (proposed) — `0bd1e266` (unreviewed).
 
 ## Drift queue (detected divergences · reconciliation status)
-- **Role model** — earlier framed as two separate pairs; per Levi (2026-05-26) they are ONE customizable-core orchestration/babysitter pair with two instances (TTC-email = `65ab2668` + `ecdc2117`; infrastructure = Code Orchestrator + Babysitter). *Status: RESOLVED — integrated in contract (Pair Pattern & Instances) + roster. Root cause: prior core not captured/compounded/propagated; switching cost too high.*
-- **Branch hygiene** — orchestrator state must stay off `ecbrain-v1`. *Status: held; resolves at commit.*
+- **Role model** — earlier framed as two separate pairs; per Levi (2026-05-26) they are ONE customizable-core orchestration/babysitter pair with two instances (TTC-email = `65ab2668` + `ecdc2117`; infrastructure = Code Orchestrator + Babysitter). *Status: RESOLVED — integrated in contract (Pair Pattern & Instances) + roster.*
+- **Branch hygiene** — orchestrator state must stay off `ecbrain-v1`. *Status: ✅ RESOLVED 2026-05-26 — committed to `main` (`dd4e6c7`), off `ecbrain-v1`.*
 - **Roster GAPs** — SIGMA Architect prompt + TTC workspace rubric not in ECB. *Status: flagged in decision queue.*
+- **State staleness (boot 2026-05-26)** — local `STATE.md` + ledger `0628e4f0` were at `@126`/mid-execution while the canonical snapshot advanced to `@130`/PARK. *Status: local `STATE.md` reconciled to `@130` this boot; ledger reconciliation PROPOSED, awaiting Levi.*
+- **Event-stream tail** — `@130` open-loop (commit decision) is resolved in reality (`dd4e6c7`) but carries no closing event. *Status: benign — superseded by snapshot `@130`; next snapshot will subsume it. No back-fill written.*
 
 ## Session log
-- **2026-05-26 (first session):** Boot (warm, clean). Confirmed Code Orchestrator per BRAIN `f34a1c37`. Levi pasted authoritative `orchestration-contract.md`. Plan approved (full 8-item mandate). Created `orchestration/` (6 files); handshake + sandbox resolved from provisional. **Levi corrections:** (A) integrate the orchestration/babysitter pair as one customizable core with instances, not separate roles — applied to contract + roster; (B) Code Orchestrator spawns read-only subagents at its own discretion, no waiting to be asked — applied to contract, code-orchestrator, analyses. Executing ECB writes (write-all + activate contract). → next: commit off `ecbrain-v1`, snapshot at close.
+- **2026-05-26 (first session):** Boot (warm, clean). Confirmed Code Orchestrator per BRAIN `f34a1c37`. Levi pasted authoritative `orchestration-contract.md`. Plan approved (full 8-item mandate). Created `orchestration/` (6 files); handshake + sandbox resolved from provisional. **Levi corrections:** (A) integrate the orchestration/babysitter pair as one customizable core with instances, not separate roles; (B) Code Orchestrator spawns read-only subagents at its own discretion, no waiting to be asked. Executed ECB writes (contract + ledger artifacts; contract activated). Committed `dd4e6c7` to `main`; snapshot `937c40f4 @130` saved; PARK.
+- **2026-05-26 (2nd session — boot):** Warm/clean boot off snapshot `937c40f4 @130`. Ran full drift check (snapshot ✓ · events `@127–130` ✓ · ledger ✓). Found prior session closed cleanly (charter complete, `dd4e6c7`, parked) but `STATE.md` + ledger still showed `@126`/mid-execution. Reconciled local `STATE.md` → `@130` (item 5 → complete; branch-hygiene + git decisions → resolved). Proposed ledger `0628e4f0` reconciliation to Levi. Awaiting direction; highest-leverage open item is the TTC (B)(2) brief routing.
 
 ---
 

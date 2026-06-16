@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__open-brain__search_thoughts",
+      "mcp__open-brain__list_thoughts",
+      "mcp__claude_ai_Google_Calendar__list_events",
+      "mcp__plugin_github_github__get_file_contents",
+      "mcp__ecb__search_thoughts",
+      "mcp__claude_ai_Supabase__get_logs",
+      "mcp__ecos-crm__get_briefing_context",
+      "mcp__claude_ai_Open_Brain__search_thoughts",
+      "mcp__ecb__list_taste_preferences",
+      "mcp__ecos-crm__search_contacts",
+      "mcp__ecb__thought_stats",
+      "mcp__ecb__list_thoughts",
+      "mcp__ecb__get_briefing_context",
+      "mcp__ecos-crm__get_person_observations",
+      "mcp__ecos-crm__get_unbilled_work",
+      "mcp__ecos-crm__search_brain_for_contact",
+      "mcp__open_brain__search_thoughts",
+      "Bash(supabase functions list *)",
+      "Bash(supabase db diff *)",
+      "Bash(supabase secrets list *)",
+      "Bash(supabase db dump *)",
+      "Bash(vercel logs *)",
+      "Bash(vercel inspect *)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__confirm_cost"
+    ]
+  }
+}
