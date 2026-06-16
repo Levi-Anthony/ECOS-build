@@ -134,7 +134,7 @@ check_document_authority_headers() {
 
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    if ! sed -n '1,40p' "$file" | rg -q 'ECB artifact key:|canonical_source:|GitHub-canonical|repo pointer|authority:'; then
+    if ! sed -n '1,40p' "$file" | grep -qE 'ECB artifact key:|canonical_source:|GitHub-canonical|repo pointer|authority:'; then
       printf '%s\n' "$file" >> "$missing_headers"
     fi
   done < <(find docs -type f -name '*.md' | sort)
@@ -164,7 +164,7 @@ check_control_room_assurance() {
       "risk tier" \
       "red/fail proof" \
       "remaining unproven assumptions"; do
-      if ! rg -q "$pattern" "$file"; then
+      if ! grep -qE "$pattern" "$file"; then
         printf 'WARN: %s missing Assurance phrase: %s\n' "$file" "$pattern" >&2
         missing=1
       fi
