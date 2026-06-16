@@ -137,12 +137,14 @@ export function createTrackedRegistrar(server: McpServer): TrackedRegistrar {
       // ECB always uses the (name, config, handler) overload; we only swap the
       // handler. Bypass the heavily-overloaded registerTool signature with a
       // narrow local cast rather than reconstructing its argument tuple.
+      // Use .call(server, ...) to preserve `this` — bare register(...) loses
+      // binding in strict-mode runtimes (Supabase edge runtime us-west-1).
       const register = server.registerTool as unknown as (
         n: string,
         c: unknown,
         h: (...a: unknown[]) => unknown,
       ) => ReturnType<McpServer["registerTool"]>;
-      return register(name, config, wrapped);
+      return register.call(server, name, config, wrapped);
     }
     return server.registerTool(...args);
   };
