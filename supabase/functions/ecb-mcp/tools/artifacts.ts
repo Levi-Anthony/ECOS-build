@@ -298,7 +298,7 @@ function patchErrorCode(msg: string): ErrorCode {
 const PatchOp = z.object({
   op: z.enum([
     "create_block", "replace_block", "append_block", "delete_block", "rename_block", "update_block_metadata",
-    "update_artifact_metadata", "set_artifact_status", "set_review_policy",
+    "set_block_sort_order", "update_artifact_metadata", "set_artifact_status", "set_review_policy",
   ]),
   path: z.string().optional(),
   from_path: z.string().optional(),
@@ -504,6 +504,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         "Normal agent write path: apply an atomic, block-level patch with optimistic concurrency. Never rewrite a whole document.\n" +
         "Use when: making a scoped edit to an existing artifact. Not for: creating one — use `create_artifact`; full-body import/repair — use `replace_artifact_body`; review-only staging — use `propose_artifact_patch`.\n" +
         "Side effects: applies immediately for live_audit artifacts (one immutable revision + changed-block re-embedding); for human_gate artifacts and any op that changes authority/lifecycle/review_policy it instead opens a pending proposal and changes NOTHING. Existing-block ops require expected_hash. NOTE: review_policy='human_gate' is the actual routing gate — authority_level in metadata is advisory only and does not affect routing.\n" +
+        "Reordering: `set_block_sort_order { path, sort_order }` changes ONLY a block's order (content/content_hash untouched, no expected_hash needed). A batch containing any set_block_sort_order op triggers a strict-total-order guard: AFTER the batch, every live block must have a unique, non-zero sort_order, or the whole patch is rejected. So reorder ALL live blocks in one patch, and any create_block in the same batch must carry its own non-zero sort_order.\n" +
         "Returns: { applied, ... } — applied=true with new_version/changed_paths, or applied=false with proposal_id when routed to review.",
       inputSchema: {
         key:             z.string(),
@@ -1062,6 +1063,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             ops.push({ op: "delete_block", path: cp, expected_hash: currentByPath.get(cp)?.content_hash });
           }
         }
+        // Migration sort_order fix (fix-spec-migration-sort-order-integrity): assign
+        // sequential sort_order in PARSE order so the compiled document matches the
+        // source body order instead of falling back to path-alphabetical. Appended
+        // after the content ops (blocks must exist first) as content-free reorder ops;
+        // this also routes the whole replacement through the strict-total-order guard.
+        newBlocks.forEach((nb, i) => {
+          ops.push({ op: "set_block_sort_order", path: nb.path, sort_order: (i + 1) * 10 });
+        });
 
         if (a.review_policy === "human_gate") {
           const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
