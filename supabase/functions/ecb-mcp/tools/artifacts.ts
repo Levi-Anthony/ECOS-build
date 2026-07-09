@@ -136,7 +136,7 @@ function deriveTitle(path: string): string {
   return seg.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
-interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; notes: string | null; created_at: string; updated_at: string }
+interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; notes: string | null; created_at: string; updated_at: string; superseded_by: string | null; superseded_at: string | null }
 interface BlockRow { id: string; artifact_id: string; path: string; title: string | null; content: string; content_hash: string; version: number; sort_order: number; metadata: Record<string, unknown>; updated_at: string }
 
 async function getArtifactByKey(supabase: Supa, key: string): Promise<ArtifactRow | null> {
@@ -163,6 +163,98 @@ function requiresHumanReview(artifact: ArtifactRow, ops: Record<string, unknown>
     const metadataPatch = patch as Record<string, unknown>;
     return "authority_level" in metadataPatch || "tags" in metadataPatch;
   });
+}
+
+// ─── ECO-46 A1.W — supersession classification + resolution (TS-side judgment) ──
+// The tool layer owns the judgment (guardrail 4): classify content vs mechanical,
+// resolve declared predecessor keys → ids, and pre-flight the unsuspended check.
+// The RPC does the mechanics (same-transaction stamp + fail-closed rowcount).
+const CONTRACT_KEY = "eco46-a1-wr-implementation-contract";
+
+// CONTENT ops (any one makes a patch content-class → supersession required).
+// Mechanical ops (exempt, op_class logged): set_block_sort_order,
+// update_block_metadata, update_artifact_metadata, set_review_policy.
+const CONTENT_OPS = new Set([
+  "create_block", "replace_block", "append_block", "delete_block", "rename_block", "set_artifact_status",
+]);
+
+function patchIsContentClass(ops: Record<string, unknown>[]): boolean {
+  return ops.some((o) => CONTENT_OPS.has(String(o.op)));
+}
+
+const SupersessionInput = z
+  .object({
+    declares: z.union([z.array(z.string()), z.literal("nothing")]).describe(
+      'Predecessor artifact keys this write supersedes, or the literal "nothing".',
+    ),
+  })
+  .describe(
+    "F3 supersession declaration (ECO-46). REQUIRED on content-class writes " +
+    "(create, body replace, and any patch/proposal with a content op). " +
+    "Mechanical-only writes are exempt. See artifact key " + CONTRACT_KEY + ".",
+  );
+
+type SupersessionParam = { declares: string[] | "nothing" };
+type SupersessionResolved =
+  | { ok: true; ids: string[]; receipt: Record<string, unknown> }
+  | { ok: false; error: string };
+
+// Resolve the supersession param for a write of the given class. On content
+// class the param is required (fail-closed) and each declared key is resolved
+// to an id and verified currently-unsuperseded. Returns the resolved predecessor
+// ids (typed → drives the RPC stamp) and an audit receipt (jsonb → written, never
+// read for logic).
+async function resolveSupersession(
+  supabase: Supa,
+  supersession: SupersessionParam | undefined,
+  isContentClass: boolean,
+): Promise<SupersessionResolved> {
+  if (!isContentClass) {
+    // Mechanical: exempt, no param required; log the op class as an audit receipt.
+    return { ok: true, ids: [], receipt: { declares: "nothing", op_class: "mechanical", exempt: true } };
+  }
+  if (!supersession || supersession.declares === undefined) {
+    return {
+      ok: false,
+      error:
+        "SUPERSESSION_REQUIRED: this is a content-class artifact write, so a supersession " +
+        'declaration is required. Pass supersession: { declares: ["predecessor_key", ...] } ' +
+        'or supersession: { declares: "nothing" }. See artifact key ' + CONTRACT_KEY +
+        " (F3 write-class contract).",
+    };
+  }
+  const declares = supersession.declares;
+  if (declares === "nothing") {
+    return { ok: true, ids: [], receipt: { declares: "nothing", op_class: "content" } };
+  }
+  if (!Array.isArray(declares) || declares.length === 0) {
+    return {
+      ok: false,
+      error:
+        'SUPERSESSION_INVALID: supersession.declares must be a non-empty array of predecessor ' +
+        'keys or the literal "nothing". See artifact key ' + CONTRACT_KEY + ".",
+    };
+  }
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const k of declares) {
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const pred = await getArtifactByKey(supabase, k);
+    if (!pred) {
+      return { ok: false, error: `SUPERSESSION_PREDECESSOR_NOT_FOUND: no artifact with key "${k}". See ${CONTRACT_KEY}.` };
+    }
+    if (pred.superseded_by) {
+      return {
+        ok: false,
+        error:
+          `SUPERSESSION_PREDECESSOR_NOT_CURRENT: "${k}" is already superseded (by ${pred.superseded_by}); ` +
+          `re-point explicitly. See ${CONTRACT_KEY}.`,
+      };
+    }
+    ids.push(pred.id);
+  }
+  return { ok: true, ids, receipt: { declares, op_class: "content", ids } };
 }
 
 async function loadBlocks(supabase: Supa, artifactId: string, includeArchived: boolean): Promise<BlockRow[]> {
@@ -342,6 +434,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         metadata:       z.record(z.string(), z.unknown()).optional(),
         blocks:         z.array(BlockInput).optional().describe("Initial blocks, each at a path like /overview, /current_state"),
         create_snapshot: z.boolean().optional().default(false),
+        supersession:   SupersessionInput.optional(),
       },
       outputSchema: writeResult({
         key:                z.string(),
@@ -353,11 +446,17 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       }),
       annotations: WRITE_APPEND,
     },
-    async ({ key, title, kind, metadata, blocks, create_snapshot }) => {
+    async ({ key, title, kind, metadata, blocks, create_snapshot, supersession }) => {
       try {
+        // ECO-46 A1.W: create is always content-class. Fail closed if the
+        // supersession declaration is missing; resolve + pre-flight predecessors.
+        const sup = await resolveSupersession(supabase, supersession, true);
+        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
         const { data, error } = await supabase.rpc("create_artifact_v2", {
           p_key: key, p_title: title, p_kind: kind ?? "document",
           p_metadata: metadata ?? {}, p_blocks: blocks ?? [], p_actor: "agent:mcp",
+          p_supersede_ids: sup.ids.length ? sup.ids : null,
+          p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(`Failed to create artifact: ${error.message}`);
         const res = data as {
@@ -514,14 +613,23 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         create_snapshot: z.boolean().optional().default(false),
         actor:           z.string().optional().default("mcp").describe("Agent identifier; actor type is always recorded as agent"),
         source_refs:     z.record(z.string(), z.unknown()).optional(),
+        supersession:    SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs }) => {
+    async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs, supersession }) => {
       try {
         const current = await getArtifactByKey(supabase, key);
         if (!current) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
+
+        // ECO-46 A1.W: batch rule — any content op makes the whole patch
+        // content-class (supersession required); mechanical-only is exempt.
+        const sup = await resolveSupersession(
+          supabase, supersession, patchIsContentClass(ops as Record<string, unknown>[]),
+        );
+        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
+        const p_supersede_ids = sup.ids.length ? sup.ids : null;
 
         if (requiresHumanReview(current, ops as Record<string, unknown>[])) {
           const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
@@ -533,6 +641,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_actor_id: actor ?? "mcp",
             p_source_refs: source_refs ?? {},
             p_metadata: { routed_by: "patch_artifact" },
+            p_supersede_ids,
+            p_supersession_receipt: sup.receipt,
           });
           if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
           const proposalPayload = {
@@ -548,6 +658,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_key: key, p_base_version: base_version, p_ops: ops,
           p_summary: summary, p_actor_id: actor ?? "mcp",
           p_source_refs: source_refs ?? {}, p_admin: false,
+          p_supersede_ids, p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; key: string; old_version: number; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
@@ -897,12 +1008,19 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         actor:                  z.string().optional().default("mcp"),
         source_refs:            z.record(z.string(), z.unknown()).optional(),
         supersedes_proposal_id: z.string().uuid().optional(),
+        supersession:           SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id }) => {
+    async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id, supersession }) => {
       try {
+        // ECO-46 A1.W: content-class proposals stage the declaration; teeth land
+        // at approval (review_artifact_change_tx / apply_artifact_proposal_agent_tx).
+        const sup = await resolveSupersession(
+          supabase, supersession, patchIsContentClass(ops as Record<string, unknown>[]),
+        );
+        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
         const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
           p_key: key,
           p_base_version: base_version,
@@ -913,6 +1031,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_source_refs: source_refs ?? {},
           p_supersedes_proposal_id: supersedes_proposal_id ?? null,
           p_metadata: { submitted_via: "propose_artifact_patch" },
+          p_supersede_ids: sup.ids.length ? sup.ids : null,
+          p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const proposePayload = {
@@ -1033,14 +1153,20 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         body:         z.string(),
         summary:      z.string(),
         mode:         z.enum(["admin_import", "migration", "repair"]),
+        supersession: SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, body, summary, mode }) => {
+    async ({ key, base_version, body, summary, mode, supersession }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
+
+        // ECO-46 A1.W: a full-body replace is always content-class.
+        const sup = await resolveSupersession(supabase, supersession, true);
+        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
+        const p_supersede_ids = sup.ids.length ? sup.ids : null;
 
         // Split body into flat heading sections → block paths; fallback /body.
         const newBlocks = splitBodyIntoBlocks(body);
@@ -1082,6 +1208,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_actor_id: `replace_artifact_body:${mode}`,
             p_source_refs: {},
             p_metadata: { mode, routed_by: "replace_artifact_body" },
+            p_supersede_ids,
+            p_supersession_receipt: sup.receipt,
           });
           if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
           const routedPayload = {
@@ -1097,6 +1225,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_key: key, p_base_version: base_version, p_ops: ops,
           p_summary: `[${mode}] ${summary}`, p_actor_id: `replace_artifact_body:${mode}`,
           p_source_refs: { mode }, p_admin: true,
+          p_supersede_ids, p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
