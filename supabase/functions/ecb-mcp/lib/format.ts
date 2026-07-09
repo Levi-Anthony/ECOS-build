@@ -50,3 +50,38 @@ export const structuredResult = (
   content: [{ type: "text" as const, text: text ?? JSON.stringify(data, null, 2) }],
   structuredContent: data,
 });
+
+// ─── ECO-46 A1.R — retrieval STAMP (uniform, computed at read time) ────────────
+// Every artifact-returning tool prepends this single line, computed from
+// substrate state (single source, zero drift). Fixed field order:
+//   lineage → trust_stage → status+version → updated_at
+// Honest-A3 (R5): the stamp asserts ONLY substrate state (lineage/trust/status/
+// recency); it makes NO claim about prose freshness. See artifact key
+// eco46-a1-wr-implementation-contract (R-code contract) and Linear beb21f26.
+export interface StampInput {
+  status: string;
+  current_version: number;
+  updated_at: string | null;
+  superseded_by: string | null;
+  superseded_at: string | null;
+  successor_key?: string | null; // resolved by the caller when superseded_by is set
+  trust_stage?: string | null;   // from artifact metadata; substrate value only
+}
+
+const isoDate = (s: string | null | undefined): string =>
+  s ? new Date(s).toISOString().slice(0, 10) : "?";
+
+/** Compute the uniform `⟦STAMP⟧ …` line for an artifact from substrate fields. */
+export function stampLine(a: StampInput): string {
+  const lineage = a.superseded_by
+    ? `SUPERSEDED → ${a.successor_key ?? a.superseded_by} (${isoDate(a.superseded_at)})`
+    : "CURRENT";
+  const parts = [
+    lineage,
+    `trust:${a.trust_stage ?? "unset"}`,
+    `${a.status} v${a.current_version}`,
+    `updated ${isoDate(a.updated_at)}`,
+  ];
+  if (a.status === "draft") parts.push("⚠ draft — not authority");
+  return `⟦STAMP⟧ ${parts.join(" | ")}`;
+}

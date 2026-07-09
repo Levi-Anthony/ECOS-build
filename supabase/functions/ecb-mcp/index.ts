@@ -47,7 +47,10 @@ const supabase = createServiceClient();
 
 const server = new McpServer({
   name: "ecb",
-  version: "1.0.0",
+  // Version legibility (ECO-46 deploy policy): callers can confirm which contract
+  // they are talking to. Bumped for the A1 W+R install (supersession write-path
+  // teeth + retrieval STAMP + readOnlyHint rider).
+  version: "1.1.0-eco46-a1wr",
 });
 
 const registrar = createTrackedRegistrar(server);
