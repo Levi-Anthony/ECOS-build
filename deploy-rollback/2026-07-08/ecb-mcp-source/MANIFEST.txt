@@ -1,0 +1,27 @@
+ecb-mcp deployed source — version 22 (slug ecb-mcp)
+ezbr_sha256: cf96567876944820904baaa459ab6cc86a5c4f38199eb511e686c102a2d2fa5d
+Verbatim rollback snapshot captured 2026-07-08 (ECO-46 deploy policy, guardrail 2).
+Restore path: redeploy these files to revert the edge function.
+
+  0a35743ab4ce      260  deno.json
+  0c5efae33467     8093  helpers.ts
+  aa200a44d3d0     4545  index.ts
+  a5ecbd363009      621  lib/annotations.ts
+  b5235acc90a9      924  lib/embedding.ts
+  bb2c488cb415     2918  lib/format.ts
+  a74b2bfbfdb7     3507  lib/metadata.ts
+  c84aaf2169fd    12700  lib/schemas.ts
+  de17d2f1baee      446  lib/supabase.ts
+  bee8916512ce    64958  tools/artifacts.ts
+  0b949c18591e    11758  tools/billing.ts
+  435877762cf4    13636  tools/boot.ts
+  3073c8e5fa00     8025  tools/brain-bridge.ts
+  d17be06e68d3     5970  tools/briefing.ts
+  a6e1da21723c    20112  tools/contacts.ts
+  9df74938f7a5     8428  tools/entities.ts
+  b095b02d72fa    13398  tools/handoff.ts
+  8310e1f5b3d2    12102  tools/observations.ts
+  fcafe3cdb054     2183  tools/opportunities.ts
+  b5bb3ab7023f     6485  tools/pulse.ts
+  0e961dfe2247    10968  tools/taste.ts
+  e3768d9233e9    29974  tools/thoughts.ts

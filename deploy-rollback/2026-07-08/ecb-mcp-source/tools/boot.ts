@@ -15,7 +15,7 @@
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
 import { READ_ONLY } from "../lib/annotations.ts";
-import { stampLine, structuredResult } from "../lib/format.ts";
+import { structuredResult } from "../lib/format.ts";
 import { HandoffSnapshotSchema, PulseEntrySchema } from "../lib/schemas.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,8 +57,6 @@ interface ArtifactRow {
   metadata: Record<string, unknown>;
   notes: string | null;
   updated_at: string;
-  superseded_by: string | null;
-  superseded_at: string | null;
 }
 
 // ─── Inline orientation derivation ───────────────────────────────────────────
@@ -234,40 +232,18 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
       // appear at boot. Legacy fields are flattened from metadata for the payload.
       let bootArtifacts: Record<string, unknown>[] = [];
       try {
-        // ECO-46 A1.R (R4): fetch ALL boot-tagged artifacts (no status filter).
-        // A superseded or non-active boot artifact must be SURFACED with an
-        // explicit BOOT DEFECT flag + stamp, never silently dropped.
         const { data, error } = await supabase
           .from("artifacts")
-          .select("id, key, title, kind, status, review_policy, current_version, metadata, notes, updated_at, superseded_by, superseded_at")
+          .select("id, key, title, kind, status, review_policy, current_version, metadata, notes, updated_at")
           .contains("metadata", { tags: ["boot"] }) // metadata @> '{"tags":["boot"]}'
+          .eq("status", "active")
           .order("updated_at", { ascending: false });
 
         if (error) {
           degraded.boot_artifacts_error = error.message;
         } else {
-          const rows = (data ?? []) as ArtifactRow[];
-          // Resolve successor keys for any superseded boot artifacts (one batch).
-          const succIds = [...new Set(rows.filter((a) => a.superseded_by).map((a) => a.superseded_by as string))];
-          const succById = new Map<string, string>();
-          if (succIds.length) {
-            const { data: succData } = await supabase.from("artifacts").select("id, key").in("id", succIds);
-            for (const s of (succData ?? []) as { id: string; key: string }[]) succById.set(s.id, s.key);
-          }
-          const defects: string[] = [];
-          bootArtifacts = rows.map((a) => {
+          bootArtifacts = ((data ?? []) as ArtifactRow[]).map((a) => {
             const m = (a.metadata ?? {}) as Record<string, unknown>;
-            const successor_key = a.superseded_by ? succById.get(a.superseded_by) ?? null : null;
-            const stamp = stampLine({
-              status: a.status, current_version: a.current_version, updated_at: a.updated_at,
-              superseded_by: a.superseded_by, superseded_at: a.superseded_at,
-              successor_key, trust_stage: (m.trust_stage as string | undefined) ?? null,
-            });
-            const isDefect = a.status !== "active" || !!a.superseded_by;
-            const boot_defect = isDefect
-              ? `BOOT DEFECT — boot-tagged artifact "${a.key}" is ${a.superseded_by ? `SUPERSEDED (→ ${successor_key ?? a.superseded_by})` : a.status.toUpperCase()}; do NOT treat as current boot canon.`
-              : null;
-            if (boot_defect) defects.push(boot_defect);
             return {
               id: a.id, key: a.key, title: a.title, kind: a.kind, version: a.current_version,
               status: a.status, review_policy: a.review_policy,
@@ -278,12 +254,8 @@ export const register: RegisterFn = (registrar, supabase, _helpers) => {
               tags: m.tags ?? [],
               notes: a.notes ?? null,
               updated_at: a.updated_at,
-              stamp,                                   // ECO-46 A1.R
-              lineage: a.superseded_by ? "superseded" : "current",
-              boot_defect,                             // ECO-46 R4
             };
           });
-          if (defects.length) degraded.boot_defects = defects;
         }
       } catch (err: unknown) {
         degraded.boot_artifacts_error = (err as Error).message;

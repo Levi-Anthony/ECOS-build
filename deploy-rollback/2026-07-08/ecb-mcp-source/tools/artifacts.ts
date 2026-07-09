@@ -20,7 +20,7 @@
 import { z } from "zod";
 import type { RegisterFn } from "../helpers.ts";
 import { READ_ONLY, WRITE_APPEND, WRITE_TRANSACTIONAL } from "../lib/annotations.ts";
-import { errorResult, stampLine, structuredResult } from "../lib/format.ts";
+import { errorResult, structuredResult } from "../lib/format.ts";
 import type { ErrorCode } from "../lib/format.ts";
 import { ArtifactManifestSchema, listOf, writeResult } from "../lib/schemas.ts";
 
@@ -136,7 +136,7 @@ function deriveTitle(path: string): string {
   return seg.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
-interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; notes: string | null; created_at: string; updated_at: string; superseded_by: string | null; superseded_at: string | null }
+interface ArtifactRow { id: string; key: string; title: string; kind: string; status: string; review_policy: "live_audit" | "human_gate"; current_version: number; metadata: Record<string, unknown>; notes: string | null; created_at: string; updated_at: string }
 interface BlockRow { id: string; artifact_id: string; path: string; title: string | null; content: string; content_hash: string; version: number; sort_order: number; metadata: Record<string, unknown>; updated_at: string }
 
 async function getArtifactByKey(supabase: Supa, key: string): Promise<ArtifactRow | null> {
@@ -162,119 +162,6 @@ function requiresHumanReview(artifact: ArtifactRow, ops: Record<string, unknown>
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return false;
     const metadataPatch = patch as Record<string, unknown>;
     return "authority_level" in metadataPatch || "tags" in metadataPatch;
-  });
-}
-
-// ─── ECO-46 A1.W — supersession classification + resolution (TS-side judgment) ──
-// The tool layer owns the judgment (guardrail 4): classify content vs mechanical,
-// resolve declared predecessor keys → ids, and pre-flight the unsuspended check.
-// The RPC does the mechanics (same-transaction stamp + fail-closed rowcount).
-export const CONTRACT_KEY = "eco46-a1-wr-implementation-contract";
-
-// CONTENT ops (any one makes a patch content-class → supersession required).
-// Mechanical ops (exempt, op_class logged): set_block_sort_order,
-// update_block_metadata, update_artifact_metadata, set_review_policy.
-const CONTENT_OPS = new Set([
-  "create_block", "replace_block", "append_block", "delete_block", "rename_block", "set_artifact_status",
-]);
-
-// Exported for the ECO-46 classification unit tests (test-infra only; no logic change).
-export function patchIsContentClass(ops: Record<string, unknown>[]): boolean {
-  return ops.some((o) => CONTENT_OPS.has(String(o.op)));
-}
-
-const SupersessionInput = z
-  .object({
-    declares: z.union([z.array(z.string()), z.literal("nothing")]).describe(
-      'Predecessor artifact keys this write supersedes, or the literal "nothing".',
-    ),
-  })
-  .describe(
-    "F3 supersession declaration (ECO-46). REQUIRED on content-class writes " +
-    "(create, body replace, and any patch/proposal with a content op). " +
-    "Mechanical-only writes are exempt. See artifact key " + CONTRACT_KEY + ".",
-  );
-
-type SupersessionParam = { declares: string[] | "nothing" };
-type SupersessionResolved =
-  | { ok: true; ids: string[]; receipt: Record<string, unknown> }
-  | { ok: false; error: string };
-
-// Resolve the supersession param for a write of the given class. On content
-// class the param is required (fail-closed) and each declared key is resolved
-// to an id and verified currently-unsuperseded. Returns the resolved predecessor
-// ids (typed → drives the RPC stamp) and an audit receipt (jsonb → written, never
-// read for logic).
-export async function resolveSupersession(
-  supabase: Supa,
-  supersession: SupersessionParam | undefined,
-  isContentClass: boolean,
-): Promise<SupersessionResolved> {
-  if (!isContentClass) {
-    // Mechanical: exempt, no param required; log the op class as an audit receipt.
-    return { ok: true, ids: [], receipt: { declares: "nothing", op_class: "mechanical", exempt: true } };
-  }
-  if (!supersession || supersession.declares === undefined) {
-    return {
-      ok: false,
-      error:
-        "SUPERSESSION_REQUIRED: this is a content-class artifact write, so a supersession " +
-        'declaration is required. Pass supersession: { declares: ["predecessor_key", ...] } ' +
-        'or supersession: { declares: "nothing" }. See artifact key ' + CONTRACT_KEY +
-        " (F3 write-class contract).",
-    };
-  }
-  const declares = supersession.declares;
-  if (declares === "nothing") {
-    return { ok: true, ids: [], receipt: { declares: "nothing", op_class: "content" } };
-  }
-  if (!Array.isArray(declares) || declares.length === 0) {
-    return {
-      ok: false,
-      error:
-        'SUPERSESSION_INVALID: supersession.declares must be a non-empty array of predecessor ' +
-        'keys or the literal "nothing". See artifact key ' + CONTRACT_KEY + ".",
-    };
-  }
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  for (const k of declares) {
-    if (seen.has(k)) continue;
-    seen.add(k);
-    const pred = await getArtifactByKey(supabase, k);
-    if (!pred) {
-      return { ok: false, error: `SUPERSESSION_PREDECESSOR_NOT_FOUND: no artifact with key "${k}". See ${CONTRACT_KEY}.` };
-    }
-    if (pred.superseded_by) {
-      return {
-        ok: false,
-        error:
-          `SUPERSESSION_PREDECESSOR_NOT_CURRENT: "${k}" is already superseded (by ${pred.superseded_by}); ` +
-          `re-point explicitly. See ${CONTRACT_KEY}.`,
-      };
-    }
-    ids.push(pred.id);
-  }
-  return { ok: true, ids, receipt: { declares, op_class: "content", ids } };
-}
-
-// ─── ECO-46 A1.R — retrieval STAMP builder ─────────────────────────────────────
-// Computes the uniform stamp line for an artifact from substrate state, resolving
-// the successor key when the artifact is superseded (provenance pointer).
-async function buildStamp(supabase: Supa, a: ArtifactRow): Promise<string> {
-  let successor_key: string | null = null;
-  if (a.superseded_by) {
-    const { data } = await supabase.from("artifacts").select("key").eq("id", a.superseded_by).maybeSingle();
-    successor_key = (data as { key?: string } | null)?.key ?? null;
-  }
-  return stampLine({
-    status: a.status,
-    current_version: a.current_version,
-    updated_at: a.updated_at,
-    superseded_by: a.superseded_by,
-    superseded_at: a.superseded_at,
-    successor_key,
-    trust_stage: (a.metadata as { trust_stage?: string } | null)?.trust_stage ?? null,
   });
 }
 
@@ -455,7 +342,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         metadata:       z.record(z.string(), z.unknown()).optional(),
         blocks:         z.array(BlockInput).optional().describe("Initial blocks, each at a path like /overview, /current_state"),
         create_snapshot: z.boolean().optional().default(false),
-        supersession:   SupersessionInput.optional(),
       },
       outputSchema: writeResult({
         key:                z.string(),
@@ -467,17 +353,11 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       }),
       annotations: WRITE_APPEND,
     },
-    async ({ key, title, kind, metadata, blocks, create_snapshot, supersession }) => {
+    async ({ key, title, kind, metadata, blocks, create_snapshot }) => {
       try {
-        // ECO-46 A1.W: create is always content-class. Fail closed if the
-        // supersession declaration is missing; resolve + pre-flight predecessors.
-        const sup = await resolveSupersession(supabase, supersession, true);
-        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
         const { data, error } = await supabase.rpc("create_artifact_v2", {
           p_key: key, p_title: title, p_kind: kind ?? "document",
           p_metadata: metadata ?? {}, p_blocks: blocks ?? [], p_actor: "agent:mcp",
-          p_supersede_ids: sup.ids.length ? sup.ids : null,
-          p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(`Failed to create artifact: ${error.message}`);
         const res = data as {
@@ -549,7 +429,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
-        const stamp = await buildStamp(supabase, a); // ECO-46 A1.R
         const blocks = await loadBlocks(supabase, a.id, include_archived ?? false);
         const manifest = {
           key: a.key, title: a.title, kind: a.kind, status: a.status, review_policy: a.review_policy,
@@ -560,7 +439,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             archived: isArchived(b) || undefined, updated_at: b.updated_at,
           })),
         };
-        return structuredResult(manifest, stamp + "\n" + JSON.stringify(manifest, null, 2));
+        return structuredResult(manifest, JSON.stringify(manifest, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -601,7 +480,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
-        const stamp = await buildStamp(supabase, a); // ECO-46 A1.R
         const { data } = await supabase.from("artifact_blocks").select("*").eq("artifact_id", a.id).in("path", paths);
         const found = (data ?? []) as BlockRow[];
         const out = paths.map(p => {
@@ -610,7 +488,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           return { path: b.path, title: b.title, content: b.content, content_hash: b.content_hash, version: b.version, metadata: b.metadata, updated_at: b.updated_at };
         });
         const payload = { key: a.key, current_version: a.current_version, blocks: out };
-        return structuredResult(payload, stamp + "\n" + JSON.stringify(payload, null, 2));
+        return structuredResult(payload, JSON.stringify(payload, null, 2));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
       }
@@ -636,23 +514,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         create_snapshot: z.boolean().optional().default(false),
         actor:           z.string().optional().default("mcp").describe("Agent identifier; actor type is always recorded as agent"),
         source_refs:     z.record(z.string(), z.unknown()).optional(),
-        supersession:    SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs, supersession }) => {
+    async ({ key, base_version, ops, summary, create_snapshot, actor, source_refs }) => {
       try {
         const current = await getArtifactByKey(supabase, key);
         if (!current) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
-
-        // ECO-46 A1.W: batch rule — any content op makes the whole patch
-        // content-class (supersession required); mechanical-only is exempt.
-        const sup = await resolveSupersession(
-          supabase, supersession, patchIsContentClass(ops as Record<string, unknown>[]),
-        );
-        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
-        const p_supersede_ids = sup.ids.length ? sup.ids : null;
 
         if (requiresHumanReview(current, ops as Record<string, unknown>[])) {
           const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
@@ -664,8 +533,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_actor_id: actor ?? "mcp",
             p_source_refs: source_refs ?? {},
             p_metadata: { routed_by: "patch_artifact" },
-            p_supersede_ids,
-            p_supersession_receipt: sup.receipt,
           });
           if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
           const proposalPayload = {
@@ -681,7 +548,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_key: key, p_base_version: base_version, p_ops: ops,
           p_summary: summary, p_actor_id: actor ?? "mcp",
           p_source_refs: source_refs ?? {}, p_admin: false,
-          p_supersede_ids, p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; key: string; old_version: number; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
@@ -711,18 +577,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     {
       title: "Search Artifacts",
       description:
-        "Block-level semantic search across artifacts, returning matching blocks with a content excerpt. Stamp-and-surface (ECO-46 R1): by default ALL non-archived statuses are returned — drafts are no longer hidden — each result carrying a ⟦STAMP⟧ line; superseded artifacts are included with a successor pointer but rank-deprioritized (R2); archived is excluded unless include_archived.\n" +
+        "Block-level semantic search across artifacts (active only by default), returning matching blocks with a content excerpt.\n" +
         "Use when: finding which artifact/block discusses something. Not for: listing artifacts by filter — use `list_artifacts`; reading a known artifact — use `get_artifact_manifest`.\n" +
-        "Side effects: none; read only (embeds the query). Pass status=… to restrict to one status, include_archived=true to include archived.\n" +
-        "Returns: { items, count } — each item has artifact_key/title/kind/status, block_path/title, similarity, excerpt, lineage, and stamp.",
+        "Side effects: none; read only (embeds the query). Pass status='draft' or include_non_active=true to widen scope.\n" +
+        "Returns: { items, count } — each item has artifact_key/title/kind/status, block_path/title, similarity, and an excerpt.",
       inputSchema: {
         query:     z.string(),
         limit:     z.number().int().min(1).max(50).optional().default(10),
         threshold: z.number().optional().default(0.38),
         kind:      z.string().optional(),
         key:       z.string().optional(),
-        status:    z.string().optional().describe("Restrict to one status. Default (unset) = all non-archived statuses (ECO-46 R1 stamp-and-surface)."),
-        include_archived: z.boolean().optional().default(false).describe("Include archived artifacts (true storage). Excluded by default."),
+        status:    z.string().optional().default("active"),
+        include_non_active: z.boolean().optional().default(false),
       },
       outputSchema: listOf(z.object({
         artifact_key:    z.string(),
@@ -733,82 +599,34 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         block_title:     z.string().nullable().optional(),
         similarity:      z.number(),
         excerpt:         z.string(),
-        lineage:         z.string().optional().describe("current | superseded (ECO-46 R2)"),
-        stamp:           z.string().optional().describe("ECO-46 A1.R stamp line for the source artifact"),
       })),
       annotations: READ_ONLY,
     },
-    async ({ query, limit, threshold, kind, key, status, include_archived }) => {
+    async ({ query, limit, threshold, kind, key, status, include_non_active }) => {
       try {
         const qEmb = await getEmbedding(query);
-        // ECO-46 A1.R (R1): stamp-and-surface. Default scope = all non-archived
-        // statuses (event-horizon fix — drafts are no longer hidden); archived
-        // excluded unless include_archived. filter_status=null → all statuses.
         const { data, error } = await supabase.rpc("match_artifact_blocks", {
           query_embedding: qEmb, match_threshold: threshold ?? 0.38, match_count: limit ?? 10,
           filter_kind: kind ?? null, filter_key: key ?? null,
-          filter_status: status ?? null,
+          filter_status: include_non_active ? null : status ?? "active",
         });
         if (error) return errorResult(`Search error: ${error.message}`);
         type R = { artifact_key: string; artifact_title: string; kind: string; artifact_status: string; block_path: string; block_title: string | null; content: string; similarity: number };
-        let rows = (data ?? []) as R[];
+        const rows = (data ?? []) as R[];
         if (!rows.length) return structuredResult({ items: [], count: 0 }, `No artifact blocks found matching "${query}".`);
-
-        // Batch-fetch lineage/substrate for the distinct artifacts in the result set.
-        const keys = [...new Set(rows.map((r) => r.artifact_key))];
-        const { data: artsData } = await supabase.from("artifacts")
-          .select("id, key, title, kind, status, review_policy, current_version, metadata, notes, created_at, updated_at, superseded_by, superseded_at")
-          .in("key", keys);
-        const arts = (artsData ?? []) as ArtifactRow[];
-        const byKey = new Map(arts.map((a) => [a.key, a]));
-        // Resolve successor keys for superseded artifacts (one batch).
-        const succIds = [...new Set(arts.filter((a) => a.superseded_by).map((a) => a.superseded_by as string))];
-        const succById = new Map<string, string>();
-        if (succIds.length) {
-          const { data: succData } = await supabase.from("artifacts").select("id, key").in("id", succIds);
-          for (const s of (succData ?? []) as { id: string; key: string }[]) succById.set(s.id, s.key);
-        }
-
-        // Archived excluded by default (true storage, not orientation).
-        if (!include_archived) rows = rows.filter((r) => byKey.get(r.artifact_key)?.status !== "archived");
-        if (!rows.length) return structuredResult({ items: [], count: 0 }, `No non-archived artifact blocks found matching "${query}".`);
-
-        const stampFor = (a: ArtifactRow | undefined): string =>
-          a
-            ? stampLine({
-                status: a.status, current_version: a.current_version, updated_at: a.updated_at,
-                superseded_by: a.superseded_by, superseded_at: a.superseded_at,
-                successor_key: a.superseded_by ? succById.get(a.superseded_by) ?? null : null,
-                trust_stage: (a.metadata as { trust_stage?: string } | null)?.trust_stage ?? null,
-              })
-            : "⟦STAMP⟧ (lineage unavailable)";
-
-        // R2: superseded results included but rank-deprioritized below current
-        // (stable within each group, preserving similarity order).
-        const ranked = rows
-          .map((r) => ({ r, superseded: !!byKey.get(r.artifact_key)?.superseded_by }))
-          .sort((x, y) => (x.superseded === y.superseded ? (y.r.similarity - x.r.similarity) : (x.superseded ? 1 : -1)))
-          .map((x) => x.r);
-
-        const out = ranked.map((r, i) => [
-          stampFor(byKey.get(r.artifact_key)),
+        const out = rows.map((r, i) => [
           `--- Result ${i + 1} (${(r.similarity * 100).toFixed(1)}% match) ---`,
           `Artifact: ${r.artifact_title} [${r.kind}; ${r.artifact_status}] (key: ${r.artifact_key})`,
           `Block: ${r.block_path}${r.block_title ? ` — ${r.block_title}` : ""}`,
           "",
           r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
         ].join("\n"));
-        const items = ranked.map((r) => {
-          const a = byKey.get(r.artifact_key);
-          return {
-            artifact_key: r.artifact_key, artifact_title: r.artifact_title, kind: r.kind,
-            artifact_status: r.artifact_status, block_path: r.block_path, block_title: r.block_title,
-            similarity: r.similarity,
-            excerpt: r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
-            lineage: a?.superseded_by ? "superseded" : "current",
-            stamp: stampFor(a),
-          };
-        });
+        const items = rows.map((r) => ({
+          artifact_key: r.artifact_key, artifact_title: r.artifact_title, kind: r.kind,
+          artifact_status: r.artifact_status, block_path: r.block_path, block_title: r.block_title,
+          similarity: r.similarity,
+          excerpt: r.content.length > 600 ? r.content.slice(0, 600) + " …" : r.content,
+        }));
         return structuredResult({ items, count: items.length }, out.join("\n\n"));
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
@@ -887,7 +705,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
-        const stamp = await buildStamp(supabase, a); // ECO-46 A1.R
         let q = supabase.from("artifact_snapshots").select("version, compiled_content, block_state, metadata").eq("artifact_id", a.id);
         q = version != null ? q.eq("version", version) : q.order("version", { ascending: false }).limit(1);
         const { data } = await q.maybeSingle();
@@ -901,18 +718,18 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
               compiled_content: snap.compiled_content,
               block_state: snap.block_state,
             };
-            return structuredResult(payload, stamp + "\n" + JSON.stringify(payload, null, 2));
+            return structuredResult(payload, JSON.stringify(payload, null, 2));
           }
           return structuredResult(
             { key: a.key, version: snap.version, compiled_content: snap.compiled_content },
-            `${stamp}\n# Snapshot v${snap.version}\n\n${snap.compiled_content}`,
+            `# Snapshot v${snap.version}\n\n${snap.compiled_content}`,
           );
         }
         if (version != null) return errorResult(`No snapshot for "${key}" at version ${version}.`);
         const compiled = await compileArtifact(supabase, a, "markdown", false);
         return structuredResult(
           { key: a.key, version: a.current_version, compiled_content: compiled, on_demand: true },
-          `${stamp}\n# Compiled on demand (no stored snapshot) — v${a.current_version}\n\n${compiled}`,
+          `# Compiled on demand (no stored snapshot) — v${a.current_version}\n\n${compiled}`,
         );
       } catch (err: unknown) {
         return errorResult(`Error: ${(err as Error).message}`);
@@ -951,9 +768,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
       try {
         const a = key ? await getArtifactByKey(supabase, key) : artifact_id ? await getArtifactById(supabase, artifact_id) : null;
         if (!a) return errorResult("Artifact not found (provide key or artifact_id).", "NOT_FOUND");
-        const stamp = await buildStamp(supabase, a); // ECO-46 A1.R
         const header = [
-          stamp,
           `## ${a.title}`, `key: ${a.key} | id: ${a.id}`,
           `Kind: ${a.kind} | Status: ${a.status} | Review: ${a.review_policy} | Version: ${a.current_version}`,
           `Updated: ${new Date(a.updated_at).toLocaleDateString()}`,
@@ -998,7 +813,7 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
     },
     async ({ kind, status, review_policy, limit }) => {
       try {
-        let q = supabase.from("artifacts").select("id, key, title, kind, status, review_policy, current_version, metadata, notes, created_at, updated_at, superseded_by, superseded_at")
+        let q = supabase.from("artifacts").select("id, key, title, kind, status, review_policy, current_version, metadata, updated_at")
           .order("updated_at", { ascending: false }).limit(limit ?? 20);
         if (kind) q = q.eq("kind", kind);
         if (status) q = q.eq("status", status);
@@ -1007,21 +822,8 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         if (error) return errorResult(`Error: ${error.message}`);
         const rows = (data ?? []) as ArtifactRow[];
         if (!rows.length) return structuredResult({ items: [], count: 0 }, "No artifacts found.");
-        // ECO-46 A1.R (R3): uniform stamp per artifact. Resolve successor keys in one batch.
-        const succIds = [...new Set(rows.filter((a) => a.superseded_by).map((a) => a.superseded_by as string))];
-        const succById = new Map<string, string>();
-        if (succIds.length) {
-          const { data: succData } = await supabase.from("artifacts").select("id, key").in("id", succIds);
-          for (const s of (succData ?? []) as { id: string; key: string }[]) succById.set(s.id, s.key);
-        }
         const lines = [`${rows.length} artifact(s):\n`];
         for (const a of rows) {
-          lines.push(stampLine({
-            status: a.status, current_version: a.current_version, updated_at: a.updated_at,
-            superseded_by: a.superseded_by, superseded_at: a.superseded_at,
-            successor_key: a.superseded_by ? succById.get(a.superseded_by) ?? null : null,
-            trust_stage: (a.metadata as { trust_stage?: string } | null)?.trust_stage ?? null,
-          }));
           lines.push(`• ${a.title} [${a.kind}] — key: ${a.key}`);
           lines.push(`  v${a.current_version} | ${a.status} | ${a.review_policy} | Updated: ${new Date(a.updated_at).toLocaleDateString()}`);
         }
@@ -1095,19 +897,12 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         actor:                  z.string().optional().default("mcp"),
         source_refs:            z.record(z.string(), z.unknown()).optional(),
         supersedes_proposal_id: z.string().uuid().optional(),
-        supersession:           SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id, supersession }) => {
+    async ({ key, base_version, ops, summary, actor, source_refs, supersedes_proposal_id }) => {
       try {
-        // ECO-46 A1.W: content-class proposals stage the declaration; teeth land
-        // at approval (review_artifact_change_tx / apply_artifact_proposal_agent_tx).
-        const sup = await resolveSupersession(
-          supabase, supersession, patchIsContentClass(ops as Record<string, unknown>[]),
-        );
-        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
         const { data, error } = await supabase.rpc("propose_artifact_patch_tx", {
           p_key: key,
           p_base_version: base_version,
@@ -1118,8 +913,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_source_refs: source_refs ?? {},
           p_supersedes_proposal_id: supersedes_proposal_id ?? null,
           p_metadata: { submitted_via: "propose_artifact_patch" },
-          p_supersede_ids: sup.ids.length ? sup.ids : null,
-          p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const proposePayload = {
@@ -1240,20 +1033,14 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
         body:         z.string(),
         summary:      z.string(),
         mode:         z.enum(["admin_import", "migration", "repair"]),
-        supersession: SupersessionInput.optional(),
       },
       outputSchema: patchResultShape,
       annotations: WRITE_TRANSACTIONAL,
     },
-    async ({ key, base_version, body, summary, mode, supersession }) => {
+    async ({ key, base_version, body, summary, mode }) => {
       try {
         const a = await getArtifactByKey(supabase, key);
         if (!a) return errorResult(`Artifact not found: ${key}`, "NOT_FOUND");
-
-        // ECO-46 A1.W: a full-body replace is always content-class.
-        const sup = await resolveSupersession(supabase, supersession, true);
-        if (!sup.ok) return errorResult(sup.error, "VALIDATION");
-        const p_supersede_ids = sup.ids.length ? sup.ids : null;
 
         // Split body into flat heading sections → block paths; fallback /body.
         const newBlocks = splitBodyIntoBlocks(body);
@@ -1295,8 +1082,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
             p_actor_id: `replace_artifact_body:${mode}`,
             p_source_refs: {},
             p_metadata: { mode, routed_by: "replace_artifact_body" },
-            p_supersede_ids,
-            p_supersession_receipt: sup.receipt,
           });
           if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
           const routedPayload = {
@@ -1312,7 +1097,6 @@ export const register: RegisterFn = (registrar, supabase, helpers) => {
           p_key: key, p_base_version: base_version, p_ops: ops,
           p_summary: `[${mode}] ${summary}`, p_actor_id: `replace_artifact_body:${mode}`,
           p_source_refs: { mode }, p_admin: true,
-          p_supersede_ids, p_supersession_receipt: sup.receipt,
         });
         if (error) return errorResult(formatPatchError(error.message), patchErrorCode(error.message));
         const res = data as { artifact_id: string; new_version: number; changed_paths: string[]; changed: ChangedEntry[] };
