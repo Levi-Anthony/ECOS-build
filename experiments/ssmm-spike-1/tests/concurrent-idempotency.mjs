@@ -27,29 +27,45 @@ const headers = {
   "accept-profile": "ssmm_spike1",
 };
 const body = JSON.stringify({
-  p_session_id: null,
+  p_loop_id: null,
   p_client_event_id: clientEventId,
   p_events: [{
-    event_type: "session_started",
+    event_type: "loop_created",
     actor: "system",
     perspective: "lr_system_evidence",
     payload: { test: "concurrent_retry" },
   }],
-  p_protocol_version: "spike1-0.2",
-  p_prompt_version: "spike1-0.2",
+  p_protocol_version: "spike1-slice-contract-0.2",
+  p_prompt_version: "spike1-shape-0.3",
   p_invocation_source: "direct_test",
-  p_next_status: "active",
-  p_next_step: "sense_arrival",
-  p_working_state: {},
-  p_purpose_handle: { id: "purpose", label: "Purpose" },
-  p_orientation_handle: { id: "orientation", label: "Orientation" },
-  p_proposed_loop: null,
-  p_active_loop: null,
-  p_return_trigger: null,
-  p_close_session: false,
+  p_next_state: {
+    loop_status: "active",
+    authoritative_phase: "sense",
+    current_step: "sense_entry",
+    working_state: {},
+    purpose_handle: { id: "purpose", label: "Purpose" },
+    orientation_handle: { id: "orientation", label: "Orientation" },
+    no_active_reason: "never_started",
+    sense_state: {
+      grounded_inputs: [],
+      field_representation: {},
+      uncertainties: [],
+      material_constraints: [],
+      purpose_orientation_context: {},
+      sense_completion_basis: null,
+      inherited_residue: null,
+    },
+    shape_proposals: [],
+    proposed_shape: null,
+    installed_shape: null,
+    move_custody: null,
+    active_adjustment: null,
+    metabolize_state: null,
+  },
+  p_close_loop: false,
 });
 
-const url = `${local.API_URL}/rest/v1/rpc/apply_runtime_event`;
+const url = `${local.API_URL}/rest/v1/rpc/apply_runtime_events`;
 const responses = await Promise.all([
   fetch(url, { method: "POST", headers, body }),
   fetch(url, { method: "POST", headers, body }),
@@ -62,21 +78,25 @@ const payloads = await Promise.all(
 );
 
 if (payloads.some((result) => result.status !== 200)) {
-  throw new Error(`Concurrent requests did not both succeed: ${
-    JSON.stringify(payloads.map((result) => result.status))
-  }`);
+  throw new Error(
+    `Concurrent requests did not both succeed: ${
+      JSON.stringify(payloads.map((result) => result.status))
+    }`,
+  );
 }
 
 const replayFlags = payloads
   .map((result) => result.body.idempotent_replay)
   .sort();
 if (JSON.stringify(replayFlags) !== JSON.stringify([false, true])) {
-  throw new Error(`Expected one write and one replay, got ${JSON.stringify(replayFlags)}`);
+  throw new Error(
+    `Expected one write and one replay, got ${JSON.stringify(replayFlags)}`,
+  );
 }
 
-const sessionIds = new Set(payloads.map((result) => result.body.session.id));
-if (sessionIds.size !== 1) {
-  throw new Error("Concurrent retries resolved to different sessions");
+const loopIds = new Set(payloads.map((result) => result.body.loop.loop_id));
+if (loopIds.size !== 1) {
+  throw new Error("Concurrent retries resolved to different main loops");
 }
 
 const eventResponse = await fetch(
@@ -88,5 +108,6 @@ if (eventResponse.status !== 200 || events.length !== 1) {
   throw new Error(`Expected one persisted event, got ${events.length}`);
 }
 
-console.log("PASS concurrent retry: 2x HTTP 200, one write, one replay, one event");
-
+console.log(
+  "PASS concurrent retry: 2x HTTP 200, one write, one replay, one event",
+);

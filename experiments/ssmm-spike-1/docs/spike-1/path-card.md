@@ -1,75 +1,91 @@
-# Spike 1 Path Card
+# Spike 1 Path Card — Slice Contract v0.2
 
-Status: provisional, frozen for the first field test
+Status: frozen execution path for the current spike
 
-## Path
+## Core path
 
-Morning initiation to installed next loop.
+`Sense → Shape proposal → acceptance → installation → Move custody →
+Metabolize → residue → closed/disposed → fresh Sense`
 
-## Starting condition
+## Entry routing
 
-No sufficiently active loop exists, or Levi is freshly awake and has not
-established operative orientation.
+- No authoritative active loop → Sense entry
+- Sense → resume grounded input
+- Shape → resume proposal review, correction, or installation
+- Move → open the Move cockpit
+- Metabolize → resume consequence integration and disposition
+- Uncertain authority → recovery; never silently create another loop
 
-## Trigger
+## Installation gate
 
-An authenticated iPhone Action Button invocation.
+Move begins exactly once, only after:
 
-## Immediate regulated outcome
+1. Levi accepts a persisted proposal.
+2. Required installation conditions are satisfied or explicitly waived.
+3. The installed Shape is persisted.
+4. `shape_installed` is persisted.
+5. `parent_entered_move` is persisted.
 
-A reality-matched, purpose-connected next loop is explicitly installed, and
-Levi either begins its first move or consciously corrects or refuses it.
+Acceptance alone is not installation. A small-Move exception must be explicit.
 
-## Available observations
+## Move cockpit
 
-- Levi's direct answers and corrections
-- current time
-- active session and installed loop, when present
-- prior return trigger
-- Purpose and Orientation handles
-- invocation and response timestamps
-- move receipt and later outcome
+The cockpit restores:
 
-## Available interventions
+- current Move and position;
+- installed Shape and decision;
+- immediate why and expandable reason chain;
+- operating orientation;
+- degrees of freedom and quick-check boundary;
+- help and invalidation boundaries;
+- exit condition and expected evidence;
+- latest progress, interruption, or bounded adjustment.
 
-- ask one bounded sensing question
-- reflect the field and expose uncertainty
-- request correction
-- propose one loop
-- identify done-for-now, first move, return trigger, and release condition
-- ask Levi to install, revise, defer, or refuse
-- resume, continue, replace, complete, or release an installed loop
+Position changes remain inside Move:
 
-## Required persistence
+`not_started | starting | active | paused | interrupted | blocked |
+awaiting_external_condition | completion_claimed`
 
-- session identity, status, versions, and current step
-- ordered, idempotent interaction events
-- current working state and Levi's corrections
-- proposed versus installed loop
-- Purpose and Orientation handles
-- first-move receipt, return trigger, and latest consequence
+Time passing does not advance the phase.
 
-## Purpose handle
+## Mid-flight fork
 
-A stable identifier and human-readable label. The first handle may be explicitly
-provisional; the runtime must not manufacture permanent purpose.
+Bounded adaptation:
 
-## Orientation handle
+`parent Move remains authoritative → nested Sense/Shape/Move/Metabolize →
+parent Move restored`
 
-A stable identifier and the local governing condition relevant to the loop.
+Material invalidation:
 
-## Consuming loop
+`Move → invalidation recorded → parent enters Metabolize → loop disposed →
+later fresh Sense`
 
-The next Action Button invocation reads active state and uses it to continue,
-correct, close, replace, or release the loop.
+Parent Move never reverses directly to parent Shape.
 
-## Principal falsifier
+## Completion boundary
 
-The completed interaction does not materially improve contact with reality or
-produce appropriate enactment, correction, or deliberate non-enactment.
+The runtime separately preserves:
 
-## Exclusions
+1. Levi’s completion claim.
+2. The installed exit-condition version.
+3. Evidence supplied.
+4. Verification method and result.
+5. Any discrepancy or limitation.
 
-No dashboard, generalized workflow engine, custom MCP layer, multi-agent system,
-automatic life planning, permanent prompt library, or final SSMM ontology.
+“Claimed complete” is not “verified complete.”
 
+## Exit
+
+Metabolize compares what occurred with the installed Shape, orientation, exit
+condition, and evidence. It produces conditioned residue but does not select
+the next Move.
+
+The next Action Button invocation after closure opens a genuinely new Sense
+that can encounter the residue.
+
+## Falsifier
+
+The slice fails if it cannot restore the same authoritative Move after a real
+execution interval, if bounded help replaces the parent Shape, if invalidation
+rewrites the old Move, if a completion claim becomes verification
+automatically, or if residue does not change what a fresh Sense can encounter.

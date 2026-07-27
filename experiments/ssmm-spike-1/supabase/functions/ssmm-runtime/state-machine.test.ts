@@ -1,10 +1,15 @@
 import {
   type Handle,
-  type InstalledLoop,
   parseRequest,
   type RuntimeRequest,
+  type ShapeContent,
+  type ShapeProposal,
 } from "./contracts.ts";
-import { type SessionState, transition } from "./state-machine.ts";
+import {
+  type MainLoopState,
+  surfaceForState,
+  transition,
+} from "./state-machine.ts";
 
 const assertEquals = (actual: unknown, expected: unknown) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -14,18 +19,21 @@ const assertEquals = (actual: unknown, expected: unknown) => {
   }
 };
 
+const assert = (condition: boolean, message: string) => {
+  if (!condition) throw new Error(message);
+};
+
 const assertThrows = (
   fn: () => unknown,
-  errorType: typeof Error,
   message: string,
 ) => {
   try {
     fn();
   } catch (error) {
-    if (error instanceof errorType && error.message.includes(message)) return;
+    if (error instanceof Error && error.message.includes(message)) return;
     throw error;
   }
-  throw new Error(`Expected ${errorType.name} containing ${message}`);
+  throw new Error(`Expected error containing ${message}`);
 };
 
 const handle: Handle = {
@@ -36,15 +44,30 @@ const handle: Handle = {
   expandable: true,
 };
 
-const base: SessionState = {
-  status: "active",
-  current_step: "start",
+const base: MainLoopState = {
+  loop_id: "00000000-0000-4000-8000-000000000001",
+  loop_status: "active",
+  authoritative_phase: "sense",
+  current_step: "sense_entry",
   working_state: {},
   purpose_handle: handle,
   orientation_handle: handle,
-  proposed_loop: null,
-  active_loop: null,
-  return_trigger: null,
+  sense_state: {
+    grounded_inputs: [],
+    field_representation: {},
+    uncertainties: [],
+    material_constraints: [],
+    purpose_orientation_context: {},
+    sense_completion_basis: null,
+    inherited_residue: null,
+  },
+  shape_proposals: [],
+  proposed_shape: null,
+  installed_shape: null,
+  move_custody: null,
+  active_adjustment: null,
+  metabolize_state: null,
+  no_active_reason: "never_started",
 };
 
 const request = (
@@ -52,167 +75,445 @@ const request = (
   input: Record<string, unknown> = {},
 ): RuntimeRequest => ({
   action,
-  client_event_id: crypto.randomUUID(),
-  session_id: null,
+  client_event_id: `test-${crypto.randomUUID()}`,
+  loop_id: base.loop_id,
   input,
   client: { source: "direct_test", shortcut_version: "test" },
 });
 
-const loop: InstalledLoop = {
-  loop: "Write the first paragraph",
-  why_this_now: "It is the live obligation",
-  purpose_handle: handle,
+const shape: ShapeContent = {
+  move_target: "Write the first paragraph",
+  decision: "Draft one paragraph before revisiting scope",
   orientation: "Prefer contact over abstraction",
-  done_for_now: "One paragraph exists",
-  first_move: "Open the draft",
-  known_constraints: ["20 minutes"],
-  return_trigger: "After the paragraph or 20 minutes",
-  release_condition: "The obligation is invalidated",
+  immediate_why: "The live obligation is the draft",
+  reason_chain_handles: ["project:draft", "purpose:practice"],
+  exit_condition: "One paragraph exists in the draft",
+  degrees_of_freedom: ["wording", "sentence order"],
+  quick_check_adjustments: ["change writing location"],
+  help_required_conditions: ["the assignment changes"],
+  invalidation_conditions: ["the draft is no longer required"],
+  anticipated_obstacles: ["low energy"],
+  completion_evidence: ["saved paragraph"],
+  installation_requirements: ["open the draft"],
+  first_physical_action: "Open the draft document",
+  interruption_handling: "Return through the Move cockpit",
+  cockpit_cues: ["show exit condition", "show immediate why"],
   uncertainty: "Energy may be lower than reported",
+  purpose_handle: handle,
 };
 
-Deno.test("start asks one bounded Sense question", () => {
-  const result = transition(request("start_or_resume"), base);
-  assertEquals(result.next.current_step, "sense_arrival");
-  assertEquals(result.interaction.kind, "question");
-  assertEquals(result.available_actions.includes("submit_answer"), true);
+const proposal: ShapeProposal = {
+  id: "00000000-0000-4000-8000-000000000002",
+  proposal_version: 1,
+  proposal_content: shape,
+  machine_interpretation: {},
+  proposal_status: "proposed",
+  created_at: "2026-07-27T00:00:00Z",
+};
+
+const acceptedState = (): MainLoopState => {
+  const result = transition(
+    request("accept_shape_proposal", {
+      declared_starting_conditions: "At the desk",
+    }),
+    {
+      ...base,
+      authoritative_phase: "shape",
+      current_step: "shape_review",
+      shape_proposals: [proposal],
+      proposed_shape: proposal,
+    },
+  );
+  return result.next;
+};
+
+const moveState = (): MainLoopState => {
+  const recorded = transition(
+    request("record_installation_action", {
+      description: "Opened the draft",
+      evidence: "Document visible",
+    }),
+    acceptedState(),
+  );
+  return transition(
+    request("confirm_shape_installed", { conditions_satisfied: true }),
+    recorded.next,
+  ).next;
+};
+
+Deno.test("Action Button with no persisted loop opens Sense and creates the main loop", () => {
+  const result = transition(request("open_current_surface"), {
+    ...base,
+    loop_id: null,
+    working_state: { unpersisted: true },
+  });
+  assertEquals(result.events.map((event) => event.event_type), [
+    "loop_created",
+    "sense_started",
+  ]);
+  assertEquals(result.next.authoritative_phase, "sense");
 });
 
-Deno.test("Sense answer and runtime reflection are separate authority events", () => {
+Deno.test("Sense records grounded input without ending by prompt count", () => {
   const result = transition(
-    request("submit_answer", { answer: "I am tired and the draft is due." }),
-    { ...base, current_step: "sense_arrival" },
+    request("submit_sense_input", {
+      grounded_input: "The draft is due and I have twenty minutes.",
+      material_constraints: ["twenty minutes"],
+    }),
+    base,
   );
+  assertEquals(result.next.authoritative_phase, "sense");
+  assertEquals(result.next.sense_state.grounded_inputs.length, 1);
   assertEquals(result.events.map((event) => event.event_type), [
-    "sense_answered",
-    "field_reflected",
+    "sense_input_recorded",
+    "sense_field_updated",
   ]);
   assertEquals(result.events[0].actor, "levi");
-  assertEquals(result.events[0].perspective, "ul_levi_report");
   assertEquals(result.events[1].actor, "runtime");
-  assertEquals(result.events[1].perspective, "proposal");
-  assertEquals(result.correction_action, "correct_reflection");
 });
 
-Deno.test("reflection correction routes to runtime Shape proposal", () => {
-  const result = transition(
-    request("correct_reflection", { answer: "The deadline is not real." }),
-    { ...base, current_step: "field_reflection" },
-  );
-  assertEquals(result.available_actions.includes("propose_shape"), true);
-  assertEquals(result.available_actions.includes("accept_shape"), false);
-});
-
-Deno.test("runtime-generated Shape becomes a proposal, not an active loop", () => {
-  const result = transition(
-    request("propose_shape", { answer: "The draft has the strongest claim." }),
-    { ...base, current_step: "shape" },
-    loop,
-  );
-  assertEquals(result.events.map((event) => event.event_type), [
-    "sense_answered",
-    "shape_proposed",
-  ]);
-  assertEquals(result.next.proposed_loop?.loop, loop.loop);
-  assertEquals(result.next.active_loop, null);
-});
-
-Deno.test("accept_shape installs only the persisted proposal", () => {
-  const result = transition(
-    request("accept_shape", { install: false, loop: { loop: "attacker" } }),
-    { ...base, current_step: "shape_review", proposed_loop: loop },
-  );
-  assertEquals(result.events[0].event_type, "loop_installed");
-  assertEquals(result.next.active_loop?.loop, loop.loop);
-  assertEquals(result.next.current_step, "move");
-});
-
-Deno.test("accept_shape cannot install a client-supplied loop without proposal", () => {
+Deno.test("Shape requires grounded input and an explicit sufficiency basis", () => {
   assertThrows(
-    () =>
-      transition(request("accept_shape", { loop }), {
-        ...base,
-        current_step: "shape_review",
-      }),
-    Error,
-    "no_proposed_shape",
+    () => transition(request("request_shape_proposal"), base, shape),
+    "sense_completion_basis_required",
   );
 });
 
-Deno.test("correct_shape never installs even with a crossed install boolean", () => {
-  const revised = { ...loop, loop: "Write one sentence" };
-  const result = transition(
-    request("correct_shape", { answer: "Smaller.", install: true }),
-    { ...base, current_step: "shape_review", proposed_loop: loop },
-    revised,
-  );
-  assertEquals(result.next.active_loop, null);
-  assertEquals(result.next.proposed_loop?.loop, revised.loop);
-  assertEquals(result.events.at(-1)?.event_type, "shape_proposed");
-});
-
-Deno.test("wire contract rejects obsolete install boolean", () => {
-  assertThrows(
-    () => parseRequest(request("accept_shape", { install: true })),
-    Error,
-    "obsolete_install_flag",
-  );
-});
-
-Deno.test("return reads an installed loop instead of restarting Sense", () => {
-  const result = transition(request("start_or_resume"), {
+Deno.test("generated Shape is persisted as a non-authoritative proposal", () => {
+  const sensed = {
     ...base,
-    active_loop: loop,
-  });
-  assertEquals(result.events[0].event_type, "session_resumed");
-  assertEquals(result.interaction.prompt.includes(loop.loop), true);
-  assertEquals(result.next.current_step, "return");
-});
-
-Deno.test("midstream resume repeats persisted interaction instead of restarting", () => {
-  const interaction = {
-    kind: "reflection" as const,
-    prompt: "What is wrong?",
-    input_mode: "dictation_or_text" as const,
-    choices: ["Accurate enough"],
-  };
-  const result = transition(request("start_or_resume"), {
-    ...base,
-    current_step: "field_reflection",
-    working_state: {
-      runtime_output: {
-        interaction,
-        available_actions: ["correct_reflection", "propose_shape"],
-        correction_action: "correct_reflection",
-      },
+    sense_state: {
+      ...base.sense_state,
+      grounded_inputs: [{ grounded_input: "The draft is due" }],
     },
-  });
-  assertEquals(result.events[0].event_type, "session_resumed");
-  assertEquals(result.interaction, interaction);
-  assertEquals(result.next.current_step, "field_reflection");
+  };
+  const result = transition(
+    request("request_shape_proposal", {
+      sense_completion_basis: "Target and constraints are grounded enough",
+    }),
+    sensed,
+    shape,
+  );
+  assertEquals(result.next.authoritative_phase, "shape");
+  assertEquals(result.next.proposed_shape?.proposal_status, "proposed");
+  assertEquals(result.next.installed_shape, null);
 });
 
-Deno.test("action cannot skip directly from Sense to installation", () => {
+Deno.test("proposal correction does not advance or install the parent loop", () => {
+  const result = transition(
+    request("correct_shape_proposal", { correction: "Make it smaller" }),
+    {
+      ...base,
+      authoritative_phase: "shape",
+      shape_proposals: [proposal],
+      proposed_shape: proposal,
+    },
+    { ...shape, move_target: "Write one sentence" },
+  );
+  assertEquals(result.next.authoritative_phase, "shape");
+  assertEquals(result.next.installed_shape, null);
+  assertEquals(result.events[0].event_type, "shape_proposal_corrected");
+});
+
+Deno.test("regeneration supersedes the prior proposal before persisting another", () => {
+  const result = transition(
+    request("request_shape_proposal"),
+    {
+      ...base,
+      authoritative_phase: "shape",
+      shape_proposals: [proposal],
+      proposed_shape: proposal,
+    },
+    { ...shape, move_target: "Write two sentences" },
+  );
+  assertEquals(result.next.shape_proposals[0].proposal_status, "superseded");
+  assertEquals(result.next.proposed_shape?.proposal_status, "proposed");
+});
+
+Deno.test("acceptance starts installation but does not enter Move", () => {
+  const result = transition(
+    request("accept_shape_proposal", {
+      declared_starting_conditions: "At the desk",
+    }),
+    {
+      ...base,
+      authoritative_phase: "shape",
+      shape_proposals: [proposal],
+      proposed_shape: proposal,
+    },
+  );
+  assertEquals(result.next.authoritative_phase, "shape");
+  assertEquals(result.next.installed_shape?.installation_status, "pending");
+  assertEquals(result.events.map((event) => event.event_type), [
+    "shape_proposal_accepted",
+    "shape_installation_started",
+  ]);
+});
+
+Deno.test("installation cannot be inferred from clarity or acceptance", () => {
   assertThrows(
     () =>
-      transition(request("accept_shape"), {
-        ...base,
-        current_step: "sense_arrival",
-        proposed_loop: loop,
-      }),
-    Error,
-    "action_not_available",
+      transition(
+        request("confirm_shape_installed", { conditions_satisfied: true }),
+        acceptedState(),
+      ),
+    "installation_actions_required",
   );
 });
 
-Deno.test("empty Sense answer is rejected", () => {
+Deno.test("Shape enters Move exactly through confirmed installation", () => {
+  const recorded = transition(
+    request("record_installation_action", {
+      description: "Opened the draft",
+      evidence: "Document visible",
+    }),
+    acceptedState(),
+  );
+  const result = transition(
+    request("confirm_shape_installed", { conditions_satisfied: true }),
+    recorded.next,
+  );
+  assertEquals(result.next.authoritative_phase, "move");
+  assertEquals(result.next.move_custody?.move_position, "not_started");
+  assertEquals(result.events.map((event) => event.event_type), [
+    "shape_installed",
+    "parent_entered_move",
+  ]);
+});
+
+Deno.test("small Move exception remains explicit", () => {
+  const accepted = transition(
+    request("accept_shape_proposal", {
+      small_move_exception: true,
+      declared_starting_conditions: "Already at the threshold",
+    }),
+    {
+      ...base,
+      authoritative_phase: "shape",
+      shape_proposals: [proposal],
+      proposed_shape: proposal,
+    },
+  ).next;
+  const result = transition(
+    request("confirm_shape_installed", { conditions_satisfied: true }),
+    accepted,
+  );
+  assertEquals(result.next.installed_shape?.small_move_exception, true);
+  assertEquals(result.next.authoritative_phase, "move");
+});
+
+Deno.test("Action Button during Move opens the authoritative Move cockpit", () => {
+  const state = moveState();
+  const result = transition(request("open_current_surface"), state);
+  assertEquals(result.next.authoritative_phase, "move");
+  assertEquals(result.interaction.kind, "cockpit");
+  assert(
+    result.interaction.prompt.includes(shape.exit_condition),
+    "exit missing",
+  );
+  assert(
+    result.interaction.prompt.includes(shape.immediate_why),
+    "reason missing",
+  );
+});
+
+Deno.test("Move position changes do not change the parent phase", () => {
+  const result = transition(
+    request("record_move_progress", {
+      progress: { note: "Two sentences exist" },
+      move_position: "active",
+    }),
+    moveState(),
+  );
+  assertEquals(result.next.authoritative_phase, "move");
+  assertEquals(result.next.move_custody?.move_position, "active");
+});
+
+Deno.test("bounded assistance uses a nested subloop while parent remains Move", () => {
+  const result = transition(
+    request("request_move_help", {
+      reported_change: "The desk became unavailable",
+      adjustment_boundary: "Location may change; target and exit stay fixed",
+      adjustment_shape: "Move to the kitchen and reopen the same draft",
+    }),
+    moveState(),
+  );
+  assertEquals(result.next.authoritative_phase, "move");
+  assertEquals(result.next.active_adjustment?.parent_phase, "move");
+  assertEquals(result.events.map((event) => event.event_type), [
+    "move_friction_reported",
+    "nested_adjustment_started",
+    "nested_adjustment_shaped",
+  ]);
+});
+
+Deno.test("nested adjustment Metabolizes and restores the same parent Move", () => {
+  const helped = transition(
+    request("request_move_help", {
+      reported_change: "The desk became unavailable",
+      adjustment_boundary: "Location may change; target and exit stay fixed",
+      adjustment_shape: "Move to the kitchen and reopen the same draft",
+    }),
+    moveState(),
+  ).next;
+  const result = transition(
+    request("record_move_progress", {
+      progress: { note: "Draft reopened in kitchen" },
+      move_position: "active",
+      nested_result: "The location change restored execution",
+      effect_on_parent: "Parent Move is active under the same Shape",
+    }),
+    helped,
+  );
+  assertEquals(result.next.authoritative_phase, "move");
+  assertEquals(result.next.active_adjustment?.nested_phase, "closed");
+  assertEquals(result.events.slice(-3).map((event) => event.event_type), [
+    "nested_adjustment_executed",
+    "nested_adjustment_metabolized",
+    "parent_move_restored",
+  ]);
+});
+
+Deno.test("material invalidation goes forward to Metabolize, never back to Shape", () => {
+  const reported = transition(
+    request("report_changed_conditions", {
+      changed: "The assignment was canceled",
+    }),
+    moveState(),
+  ).next;
+  const result = transition(
+    request("classify_change", {
+      classification: "material_invalidation",
+      basis: "The target no longer exists",
+    }),
+    reported,
+  );
+  assertEquals(result.next.authoritative_phase, "metabolize");
+  assertEquals(result.next.metabolize_state?.move_disposition, "invalidated");
+  assertEquals(result.events.at(-1)?.event_type, "parent_entered_metabolize");
+});
+
+Deno.test("completion claim enters Metabolize without becoming verification", () => {
+  const result = transition(
+    request("claim_completion", {
+      claim_statement: "I finished the paragraph",
+      claimed_result: "One paragraph exists",
+      evidence: [{ kind: "document", value: "draft" }],
+    }),
+    moveState(),
+  );
+  assertEquals(result.next.authoritative_phase, "metabolize");
+  assertEquals(result.next.metabolize_state?.verification_result, null);
+  assertEquals(result.events[0].event_type, "move_completion_claimed");
+});
+
+Deno.test("verification is a distinct persisted assessment", () => {
+  const claimed = transition(
+    request("claim_completion", {
+      claim_statement: "I finished",
+      claimed_result: "One paragraph exists",
+    }),
+    moveState(),
+  ).next;
+  const result = transition(
+    request("submit_metabolize_input", {
+      verification_result: "partially_verified",
+      verification_assessment: {
+        method: "compared supplied text with exit condition",
+      },
+      credited_result: "Paragraph exists; save state uncertain",
+      consequences: [],
+      lessons: ["Evidence requirement should name save state"],
+      closure_basis: "Partial evidence",
+    }),
+    claimed,
+  );
+  assertEquals(
+    result.next.metabolize_state?.verification_result,
+    "partially_verified",
+  );
+  assertEquals(
+    result.events.at(-1)?.event_type,
+    "completion_partially_verified",
+  );
+});
+
+Deno.test("conditioned residue closes the loop without selecting a next Move", () => {
+  const claimed = transition(
+    request("claim_completion", {
+      claim_statement: "I finished",
+      claimed_result: "One paragraph exists",
+    }),
+    moveState(),
+  ).next;
+  const metabolized = transition(
+    request("submit_metabolize_input", {
+      verification_result: "cannot_verify",
+      credited_result: "A completion claim exists",
+      closure_basis: "External verification unavailable",
+    }),
+    claimed,
+  ).next;
+  const residue = transition(
+    request("confirm_residue", {
+      residue: {
+        what_landed: "A paragraph was reportedly written",
+        what_remains_alive: "Verification is unavailable",
+      },
+    }),
+    metabolized,
+  ).next;
+  const result = transition(request("close_loop"), residue);
+  assertEquals(result.next.loop_status, "closed");
+  assertEquals(result.events[0].event_type, "loop_closed");
+  assertEquals(Object.hasOwn(result.next, "next_move"), false);
+});
+
+Deno.test("a fresh Sense encounters residue as field evidence, not a selected Move", () => {
+  const residue = {
+    what_landed: "A paragraph was written",
+    what_remains_unresolved: "Its save state should be checked",
+  };
+  const state: MainLoopState = {
+    ...base,
+    loop_id: null,
+    sense_state: {
+      ...base.sense_state,
+      inherited_residue: residue,
+    },
+    no_active_reason: "last_loop_closed:completed",
+  };
+  const result = transition(request("open_current_surface"), state);
+  assertEquals(result.next.authoritative_phase, "sense");
+  assertEquals(result.next.sense_state.inherited_residue, residue);
+  assert(
+    result.interaction.prompt.includes("changed field evidence"),
+    "residue boundary missing",
+  );
+  assert(
+    result.interaction.prompt.includes("not as a preselected Move"),
+    "fresh Sense was not protected from Move selection",
+  );
+});
+
+Deno.test("unknown authority opens recovery rather than a new loop", () => {
+  const state = {
+    ...moveState(),
+    loop_status: "unknown" as const,
+    authoritative_phase: "unknown" as const,
+    current_step: "recovery",
+  };
+  const surface = surfaceForState(state);
+  assertEquals(surface.interaction.kind, "recovery");
+  assertEquals(surface.available_actions, ["recover_authoritative_state"]);
+});
+
+Deno.test("wire contract rejects obsolete installation boolean", () => {
   assertThrows(
     () =>
-      transition(request("submit_answer", { answer: " " }), {
-        ...base,
-        current_step: "sense_arrival",
-      }),
-    Error,
-    "answer_required",
+      parseRequest(request("accept_shape_proposal", {
+        install: true,
+      })),
+    "obsolete_install_flag",
   );
 });

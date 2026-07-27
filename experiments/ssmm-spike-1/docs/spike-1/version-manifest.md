@@ -6,19 +6,20 @@
 - Supabase project:
 - Verified implementation commit: `610e55c`
 - Migration: `202607260001_ssmm_spike1_runtime.sql`
-- Edge Function: `spike1-0.2.0`
-- Protocol version: `spike1-0.2`
-- Prompt version: `spike1-0.2`
+- Edge Function: `spike1-0.3.0`
+- Protocol version: `spike1-slice-contract-0.2`
+- Prompt version: `spike1-shape-0.3`
 - Shortcut version: `spike1-0.1`
-- Path-card version: `spike1-0.1`
-- Test-plan version: `spike1-0.1`
+- Path-card version: `slice-contract-0.2`
+- Test-plan version: `slice-contract-0.2`
 - Reviewer:
 - Secrets verified: no
 - Clean local migration reset: yes
-- Local runtime tests: 14 passed
-- Local database tests: 15 passed
+- Local runtime tests: 24 passed
+- Local database tests: 27 passed
 - Concurrent retry race: passed
-- Database lint: no schema errors
+- Local HTTP custody path: passed
+- Database lint: no `ssmm_spike1` findings; pgTAP extension findings remain
 - RLS enabled remotely: no
 - Access grants verified remotely: no
 - Service-role BYPASSRLS behavior acknowledged: yes

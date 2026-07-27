@@ -1,44 +1,48 @@
-import type { Handle, InstalledLoop } from "./contracts.ts";
-import type { SessionState } from "./state-machine.ts";
+import type { Handle, ShapeContent } from "./contracts.ts";
+import type { MainLoopState } from "./state-machine.ts";
 
 export const SHAPE_SYSTEM_PROMPT = `
-You are the Shape intervention in a provisional SSMM field instrument.
-Propose exactly one bounded next loop from Levi's direct reports and corrections.
-Do not diagnose causes, classify a phase, manufacture purpose, or claim superior
-access to Levi's experience. The proposal must be specific, directly actionable,
-easy to correct, and connected to the supplied Purpose and Orientation handles.
-Return only JSON matching the requested shape.
+You are the Shape intervention in SSMM Spike 1.
+Propose exactly one bounded Move from Levi's grounded Sense inputs.
+The result is a non-authoritative proposal until Levi accepts it and the
+installation gate succeeds. Do not diagnose causes, manufacture Purpose, or
+claim superior access to Levi's experience. Condition the operator-field
+relationship: make the Move startable, preserve why it exists, specify the
+adaptation envelope, name invalidation conditions, and define observable
+completion evidence. Return only JSON matching the requested shape.
 `.trim();
 
 export function shapePrompt(
-  state: SessionState,
-  strongestClaim: string,
+  state: MainLoopState,
   correction?: string,
 ): string {
-  const prior = state.proposed_loop
-    ? `Prior proposal:\n${JSON.stringify(state.proposed_loop)}`
+  const prior = state.proposed_shape
+    ? `Prior proposal:\n${JSON.stringify(state.proposed_shape)}`
     : "No prior proposal.";
   return [
-    `Direct Sense reports:\n${
-      JSON.stringify(state.working_state.sense_answers ?? [])
-    }`,
-    `Reflection correction:\n${
-      String(state.working_state.reflection_correction ?? "None")
-    }`,
-    `Strongest legitimate claim:\n${strongestClaim}`,
+    `Grounded Sense state:\n${JSON.stringify(state.sense_state)}`,
     `Shape correction:\n${correction ?? "None"}`,
     `Purpose handle:\n${JSON.stringify(state.purpose_handle)}`,
     `Orientation handle:\n${JSON.stringify(state.orientation_handle)}`,
     prior,
-    "Return one JSON object with: loop, why_this_now, purpose_handle, orientation,",
-    "done_for_now, first_move, known_constraints (array), return_trigger,",
-    "release_condition, uncertainty.",
+    "Return one JSON object with these exact keys:",
+    "move_target, decision, orientation, immediate_why,",
+    "reason_chain_handles (string array), exit_condition,",
+    "degrees_of_freedom (string array),",
+    "quick_check_adjustments (string array),",
+    "help_required_conditions (string array),",
+    "invalidation_conditions (string array),",
+    "anticipated_obstacles (string array),",
+    "completion_evidence (string array),",
+    "installation_requirements (string array), first_physical_action,",
+    "interruption_handling, cockpit_cues (string array), uncertainty,",
+    "purpose_handle.",
   ].join("\n\n");
 }
 
 export function enforceRuntimeHandles(
-  loop: InstalledLoop,
+  shape: ShapeContent,
   purpose: Handle,
-): InstalledLoop {
-  return { ...loop, purpose_handle: purpose };
+): ShapeContent {
+  return { ...shape, purpose_handle: purpose };
 }
