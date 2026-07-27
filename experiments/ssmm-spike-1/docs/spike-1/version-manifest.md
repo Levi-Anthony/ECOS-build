@@ -5,6 +5,7 @@
 - Git branch: `codex/eco-70-ssmm-spike-1`
 - Supabase project:
 - Verified implementation commit: `cfa7a6d`
+- Future-plan amendment commit: `c18738b`
 - Migration: `202607260001_ssmm_spike1_runtime.sql`
 - Edge Function: `spike1-0.3.0`
 - Protocol version: `spike1-slice-contract-0.2`
