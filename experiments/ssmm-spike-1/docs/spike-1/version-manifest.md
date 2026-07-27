@@ -1,0 +1,27 @@
+# Spike 1 Version Manifest
+
+- Review date: `2026-07-26`
+- Linear issue: `ECO-70` (child of `ECO-61`)
+- Git branch: `codex/eco-70-ssmm-spike-1`
+- Supabase project:
+- Git commit:
+- Migration: `202607260001_ssmm_spike1_runtime.sql`
+- Edge Function: `spike1-0.2.0`
+- Protocol version: `spike1-0.2`
+- Prompt version: `spike1-0.2`
+- Shortcut version: `spike1-0.1`
+- Path-card version: `spike1-0.1`
+- Test-plan version: `spike1-0.1`
+- Reviewer:
+- Secrets verified: no
+- Clean local migration reset: yes
+- Local runtime tests: 14 passed
+- Local database tests: 15 passed
+- Concurrent retry race: passed
+- Database lint: no schema errors
+- RLS enabled remotely: no
+- Access grants verified remotely: no
+- Service-role BYPASSRLS behavior acknowledged: yes
+- Retry idempotency verified remotely: no
+- Real field test completed: no
+- Review packet complete: no
