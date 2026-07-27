@@ -72,6 +72,19 @@ Current evidence:
 
 This proves local implementation behavior. It does not prove the product claim.
 
+## Future promotion seam
+
+The evidence-informed destination is one greenfield Supabase project with the
+future ECB semantic-memory core and SSMM runtime structurally beside one
+another. `thoughts` answers what knowledge is relevant; `ssmm_*` authority
+answers what is happening now and what transition is legal.
+
+This is a non-governing promotion direction, not a Spike 1 prerequisite.
+Semantic memory must never be used to infer current loop state, and runtime
+events become thoughts only after Metabolize yields human-confirmed durable
+meaning. See
+[the future ECB semantic-memory amendment](docs/spike-1/future-ecb-semantic-memory-amendment.md).
+
 ## Reality gate
 
 A review-complete field test still requires:

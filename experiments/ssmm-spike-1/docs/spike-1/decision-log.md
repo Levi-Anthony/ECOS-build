@@ -60,5 +60,28 @@
 - Decision: bounded adaptation runs through one parent-linked adjustment
   subloop while the parent remains in Move
 - Non-claim: this is not a generalized recursive orchestration engine
+- Promotion status: the current `adjustment_subloops` table is reversible
+  implementation evidence, not a hard-locked destination schema. An ordered
+  event sequence may prove sufficient; field evidence must earn any generalized
+  parent-child engine.
 - Falsifier: the adjustment silently changes target, reason, orientation, or
   exit condition
+
+## D-007 — Future ECB/SSMM co-location without authority collapse
+
+- Class: evidence-informed future-plan amendment
+- Standing: non-governing until tested and ratified
+- Direction: the future semantic-memory core and SSMM runtime likely inhabit
+  one greenfield Supabase project while remaining structurally separate
+- Boundary: `thoughts` preserves semantically retrievable settled meaning;
+  `ssmm_*` structures preserve authoritative current position and legal
+  transition
+- Memory circulation: runtime event → Metabolize → human-confirmed durable
+  meaning → thoughts projection
+- Prohibition: semantic retrieval, model output, client booleans, and
+  Shortcut-supplied phase claims cannot advance or reconstruct authoritative
+  runtime state
+- Non-prerequisite: canonical OB1 installation must not delay remote runtime,
+  direct HTTP, Shortcut, or execution-gap field proof
+- Open evidence: promotion target, exact schema, adjustment representation,
+  transition-function decomposition, and any MCP write vocabulary

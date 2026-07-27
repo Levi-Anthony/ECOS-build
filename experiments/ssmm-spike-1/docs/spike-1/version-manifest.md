@@ -12,6 +12,7 @@
 - Shortcut version: `spike1-0.1`
 - Path-card version: `slice-contract-0.2`
 - Test-plan version: `slice-contract-0.2`
+- Future ECB/SSMM amendment: evidence-informed, non-governing
 - Reviewer:
 - Secrets verified: no
 - Clean local migration reset: yes

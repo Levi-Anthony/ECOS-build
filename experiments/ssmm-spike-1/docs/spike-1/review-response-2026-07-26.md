@@ -79,6 +79,20 @@ The revised implementation adds:
 - Controlled and real field tests
 - Review packet and falsifier assessment
 
+## Future promotion boundary
+
+An evidence-informed, non-governing amendment now points toward one future
+greenfield Supabase project containing both the rebuilt ECB semantic-memory
+core and the SSMM runtime as structurally separate systems.
+
+This does not add a Spike 1 gate. The current runtime can proceed before the
+future thoughts substrate exists. Semantic memory must not infer authoritative
+loop state, and runtime records become thought candidates only after
+Metabolize produces human-confirmed durable meaning with loop/Shape provenance.
+
+The current dedicated adjustment-subloop table remains reversible Slice 1
+evidence, not a hard-locked promotion schema.
+
 ## Accountability
 
 - Linear `ECO-70` tracks the Spike 1 reality-integration work under parent
