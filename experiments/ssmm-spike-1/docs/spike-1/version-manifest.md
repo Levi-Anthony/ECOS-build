@@ -4,7 +4,7 @@
 - Linear issue: `ECO-70` (child of `ECO-61`)
 - Git branch: `codex/eco-70-ssmm-spike-1`
 - Supabase project:
-- Git commit:
+- Verified implementation commit: `610e55c`
 - Migration: `202607260001_ssmm_spike1_runtime.sql`
 - Edge Function: `spike1-0.2.0`
 - Protocol version: `spike1-0.2`
