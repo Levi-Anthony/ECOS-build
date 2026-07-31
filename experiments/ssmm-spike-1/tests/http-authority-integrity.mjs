@@ -191,7 +191,7 @@ assert(semanticReplay.body.loop_revision === semanticSuccess.body.loop_revision,
 assertSnapshotEqual(afterSemanticSuccess, await snapshot(idempotencyLoopId), "semantic replay");
 
 const idempotencyConflicts = [
-  ["different action", { ...semanticRequest, action: "record_interruption" }],
+  ["different action", { ...semanticRequest, action: "recover_authoritative_state", input: { decision: "mark_unknown", reason: "Different semantic action fixture" } }],
   ["different payload", { ...semanticRequest, input: { grounded_input: "Different bounded input" } }],
   ["different expected revision", { ...semanticRequest, expected_loop_revision: 2 }],
 ];

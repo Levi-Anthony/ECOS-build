@@ -1,4 +1,10 @@
-import type { Handle, RuntimeRequest } from "./contracts.ts";
+import {
+  type ConflictCategory,
+  conflictCategories,
+  type Handle,
+  type RuntimeConflictResponse,
+  type RuntimeRequest,
+} from "./contracts.ts";
 import type { RuntimeRequestFingerprint } from "./request-fingerprint.ts";
 import type { MainLoopState, Transition } from "./state-machine.ts";
 
@@ -29,6 +35,39 @@ export class RepositoryError extends Error {
   ) {
     super("repository_request_failed");
   }
+}
+
+export function parseConflict(error: RepositoryError): RuntimeConflictResponse | null {
+  if (error.status !== 409) return null;
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(error.detail) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (body.code !== "PT409" || typeof body.message !== "string") return null;
+  const category = conflictCategories.find((item) => body.message === item);
+  if (!category) return null;
+
+  let details: Record<string, unknown> = {};
+  if (typeof body.details === "string" && body.details) {
+    try {
+      const parsed = JSON.parse(body.details) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) details = parsed as Record<string, unknown>;
+    } catch {
+      // Invalid details are omitted from the safe response.
+    }
+  }
+  const response: RuntimeConflictResponse = {
+    error: "conflict",
+    category: category as ConflictCategory,
+    current_loop_revision: Number.isSafeInteger(details.current_loop_revision) ? Number(details.current_loop_revision) : null,
+  };
+  if (category === "stale_proposal") {
+    response.current_proposal_id = typeof details.current_proposal_id === "string" ? details.current_proposal_id : null;
+    response.current_proposal_version = Number.isSafeInteger(details.current_proposal_version) ? Number(details.current_proposal_version) : null;
+  }
+  return response;
 }
 
 const headers = (config: RepositoryConfig) => ({

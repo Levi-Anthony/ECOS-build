@@ -1,14 +1,11 @@
 import { constantTimeSecretMatch } from "./auth.ts";
 import { config } from "./config.ts";
 import {
-  type ConflictCategory,
-  conflictCategories,
   FUNCTION_VERSION,
   type Handle,
   parseRequest,
   PROMPT_VERSION,
   PROTOCOL_VERSION,
-  type RuntimeConflictResponse,
   type RuntimeRequest,
   type RuntimeResponse,
 } from "./contracts.ts";
@@ -18,6 +15,7 @@ import {
   getLatestLoop,
   getLoop,
   lookupRuntimeRequest,
+  parseConflict,
   type PersistedResult,
   persistTransition,
   RepositoryError,
@@ -256,42 +254,6 @@ function readOnlyResponse(
     },
   };
 }
-
-const parseConflict = (
-  error: RepositoryError,
-): RuntimeConflictResponse | null => {
-  let message = "";
-  let details: Record<string, unknown> = {};
-  try {
-    const body = JSON.parse(error.detail) as Record<string, unknown>;
-    message = String(body.message ?? "");
-    if (typeof body.details === "string" && body.details) {
-      details = JSON.parse(body.details) as Record<string, unknown>;
-    }
-  } catch {
-    message = error.detail;
-  }
-  const category = conflictCategories.find((item) => message.includes(item));
-  if (!category) return null;
-  const response: RuntimeConflictResponse = {
-    error: "conflict",
-    category: category as ConflictCategory,
-    current_loop_revision: Number.isSafeInteger(details.current_loop_revision)
-      ? Number(details.current_loop_revision)
-      : null,
-  };
-  if (category === "stale_proposal") {
-    response.current_proposal_id = typeof details.current_proposal_id === "string"
-      ? details.current_proposal_id
-      : null;
-    response.current_proposal_version = Number.isSafeInteger(
-        details.current_proposal_version,
-      )
-      ? Number(details.current_proposal_version)
-      : null;
-  }
-  return response;
-};
 
 Deno.serve(async (request) => {
   if (request.method !== "POST") {

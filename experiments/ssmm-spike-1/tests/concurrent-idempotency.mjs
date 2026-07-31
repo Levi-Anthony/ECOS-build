@@ -20,9 +20,18 @@ const assert = (ok, message) => {
   checks += 1;
   if (!ok) throw new Error(message);
 };
-const conflict = (result) => result.status !== 200 &&
-  result.body?.code === "40001" &&
+const conflict = (result) => result.status === 409 &&
+  result.body?.code === "PT409" &&
   result.body?.message === "stale_loop_revision";
+const raceDurationsMs = {};
+const runRace = async (label, options) => {
+  const startedAt = performance.now();
+  const results = await Promise.all(options.map(call));
+  const elapsedMs = Math.round(performance.now() - startedAt);
+  raceDurationsMs[label] = elapsedMs;
+  assert(elapsedMs < 10_000, `${label} race did not return promptly: ${elapsedMs}ms`);
+  return results;
+};
 const normalize = (value) => value === null || ["string", "number", "boolean"].includes(typeof value)
   ? value
   : Array.isArray(value)
@@ -253,7 +262,7 @@ const moveFixture = async (tag) => {
     next: { ...f.state, shape_proposals: [{ ...f.p, proposal_status: "accepted" }], proposed_shape: null, installed_shape: installed(f.p) },
   };
   const options = [correction, acceptance];
-  const results = await Promise.all(options.map(call));
+  const results = await runRace("correction_acceptance", options);
   const winner = results.find((result) => result.status === 200);
   const loser = results.find(conflict);
   assert(Boolean(winner), "correction/acceptance race lacked one winner");
@@ -291,7 +300,7 @@ const moveFixture = async (tag) => {
     next: { ...f.state, authoritative_phase: "move", current_step: "move_cockpit", installed_shape: installed(f.p, "installed"), move_custody: custody() },
   });
   const options = [option("one"), option("two")];
-  const results = await Promise.all(options.map(call));
+  const results = await runRace("two_installation", options);
   const winner = results.find((result) => result.status === 200);
   assert(results.filter((result) => result.status === 200).length === 1, "installation race lacked exactly one winner");
   assert(results.filter(conflict).length === 1, `installation loser was not stale: ${JSON.stringify(results)}`);
@@ -320,7 +329,7 @@ const moveFixture = async (tag) => {
     next: { ...f.state, move_custody: custody({ tag }) },
   });
   const options = [option("one"), option("two")];
-  const results = await Promise.all(options.map(call));
+  const results = await runRace("two_progress_write", options);
   const winner = results.find((result) => result.status === 200);
   assert(results.filter((result) => result.status === 200).length === 1, "progress race lacked exactly one winner");
   assert(results.filter(conflict).length === 1, `progress loser was not stale: ${JSON.stringify(results)}`);
@@ -334,4 +343,4 @@ const moveFixture = async (tag) => {
   await close(f.loopId);
 }
 
-console.log(`PASS authority concurrency: ${checks}/${checks} adversarial assertions`);
+console.log(`PASS authority concurrency: ${checks}/${checks} adversarial assertions; race_durations_ms=${JSON.stringify(raceDurationsMs)}`);

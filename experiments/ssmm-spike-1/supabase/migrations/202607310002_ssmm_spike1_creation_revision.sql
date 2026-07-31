@@ -69,7 +69,7 @@ begin
      or p_accepted_proposal_id is not null
      or p_accepted_proposal_version is not null then
     raise exception 'stale_loop_revision'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', null
       )::text;
@@ -101,7 +101,7 @@ begin
        or v_existing_request.request_canonical is distinct from p_request_canonical
        or v_existing_request.request_canonical_text is distinct from p_request_canonical_text then
       raise exception 'idempotency_fingerprint_conflict'
-        using errcode = '40001',
+        using errcode = 'PT409',
         detail = jsonb_build_object(
           'current_loop_revision', v_new_revision
         )::text;
@@ -124,7 +124,7 @@ begin
     from ssmm_spike1.main_loops
     where id = v_legacy_loop_id;
     raise exception 'idempotency_fingerprint_conflict'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_new_revision
       )::text;
@@ -144,7 +144,7 @@ begin
 
   if found then
     raise exception 'stale_loop_revision'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_active_revision
       )::text;

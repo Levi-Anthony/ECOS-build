@@ -76,10 +76,14 @@ assert(staleBody.current_loop_revision === loopRevision, "stale proposal conflic
 const accepted = await invoke("accept_shape_proposal", { declared_starting_conditions: "Field note open at the writing cursor" }, loopId, { proposal: acceptedProposal });
 assert(accepted.authoritative_phase === "shape", "acceptance advanced to Move");
 assert(accepted.state_summary.installed_shape?.installation_status === "pending", "acceptance did not start explicit installation");
+assert(accepted.state_summary.installed_shape?.exit_condition === acceptedProposal.proposal_content.exit_condition, "acceptance changed the reviewed exit condition");
+assert(accepted.state_summary.installed_shape?.immediate_why === acceptedProposal.proposal_content.immediate_why, "acceptance changed the reviewed rationale");
 await invoke("record_installation_action", { description: "Opened the Spike 1 field note at the writing cursor", evidence: "Document visible and editable" });
 const installed = await invoke("confirm_shape_installed", { conditions_satisfied: true });
 assert(installed.authoritative_phase === "move", "installation did not enter Move");
 assert(installed.state_summary.installed_shape?.installation_status === "installed", "authoritative Shape was not installed");
+assert(installed.state_summary.installed_shape?.exit_condition === acceptedProposal.proposal_content.exit_condition, "installation changed the accepted exit condition");
+assert(installed.state_summary.installed_shape?.immediate_why === acceptedProposal.proposal_content.immediate_why, "installation changed the accepted rationale");
 
 const moveLoopId = loopId;
 const moveRevision = loopRevision;
@@ -88,8 +92,8 @@ assert(restored.authoritative_phase === "move", "return did not restore Move");
 assert(restored.interaction.kind === "cockpit", "return did not open cockpit");
 assert(restored.loop_revision === moveRevision, "read-only restoration changed revision");
 assert(restored.receipt.persisted === false, "read-only restoration wrote an event");
-assert(restored.interaction.prompt.includes("One complete paragraph exists in the saved Spike 1 field note"), "cockpit lost the installed exit condition");
-assert(restored.interaction.prompt.includes("A real written result is needed to test custody across the gap"), "cockpit lost the installed rationale");
+assert(restored.interaction.prompt.includes(acceptedProposal.proposal_content.exit_condition), "cockpit lost the installed exit condition");
+assert(restored.interaction.prompt.includes(acceptedProposal.proposal_content.immediate_why), "cockpit lost the installed rationale");
 
 const helped = await invoke("request_move_help", {
   reported_change: "The desk became unavailable",

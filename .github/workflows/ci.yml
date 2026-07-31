@@ -74,7 +74,7 @@ jobs:
           deno-version: v2.x
       - uses: supabase/setup-cli@v1
         with:
-          version: 2.75.0
+          version: 2.76.9
 
       - name: Check Edge Function
         id: deno_check

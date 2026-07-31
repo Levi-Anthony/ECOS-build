@@ -43,7 +43,7 @@ begin
      or v_request.request_canonical is distinct from p_request_canonical
      or v_request.request_canonical_text is distinct from p_request_canonical_text then
     raise exception 'idempotency_fingerprint_conflict'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_current_revision
       )::text;
@@ -129,7 +129,7 @@ begin
        or v_existing_request.request_canonical is distinct from p_request_canonical
        or v_existing_request.request_canonical_text is distinct from p_request_canonical_text then
       raise exception 'idempotency_fingerprint_conflict'
-        using errcode = '40001',
+        using errcode = 'PT409',
         detail = jsonb_build_object(
           'current_loop_revision', v_new_revision
         )::text;
@@ -155,7 +155,7 @@ begin
     where ml.id = v_legacy_loop_id;
 
     raise exception 'idempotency_fingerprint_conflict'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_new_revision
       )::text;
@@ -164,7 +164,7 @@ begin
   if p_loop_id is null then
     if p_action <> 'open_current_surface' or p_expected_loop_revision is not null then
       raise exception 'stale_loop_revision'
-        using errcode = '40001',
+        using errcode = 'PT409',
         detail = jsonb_build_object(
           'current_loop_revision', null
         )::text;
@@ -183,7 +183,7 @@ begin
     if p_expected_loop_revision is null
        or p_expected_loop_revision <> v_loop.authoritative_revision then
       raise exception 'stale_loop_revision'
-        using errcode = '40001',
+        using errcode = 'PT409',
         detail = jsonb_build_object(
           'current_loop_revision', v_loop.authoritative_revision
         )::text;
@@ -206,7 +206,7 @@ begin
          or v_current_proposal.proposal_version <> p_accepted_proposal_version
          or v_current_proposal.proposal_status <> 'proposed' then
         raise exception 'stale_proposal'
-          using errcode = '40001',
+          using errcode = 'PT409',
           detail = jsonb_build_object(
             'current_loop_revision', v_loop.authoritative_revision,
             'current_proposal_id', v_current_proposal.id,
@@ -234,7 +234,7 @@ begin
              and sp.proposal_status = 'accepted'
          ) then
         raise exception 'stale_proposal'
-          using errcode = '40001',
+          using errcode = 'PT409',
           detail = jsonb_build_object(
             'current_loop_revision', v_loop.authoritative_revision,
             'current_proposal_id', v_accepted_shape.accepted_proposal_id,
@@ -256,7 +256,7 @@ begin
        is distinct from p_accepted_proposal_version
   ) then
     raise exception 'stale_proposal'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', case
           when p_loop_id is null then null else v_loop.authoritative_revision end,
@@ -399,7 +399,7 @@ begin
        or v_existing_request.request_canonical is distinct from p_request_canonical
        or v_existing_request.request_canonical_text is distinct from p_request_canonical_text then
       raise exception 'idempotency_fingerprint_conflict'
-        using errcode = '40001',
+        using errcode = 'PT409',
         detail = jsonb_build_object(
           'current_loop_revision', v_new_revision
         )::text;
@@ -425,7 +425,7 @@ begin
     where ml.id = v_legacy_loop_id;
 
     raise exception 'idempotency_fingerprint_conflict'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_new_revision
       )::text;
@@ -436,7 +436,7 @@ begin
      or p_accepted_proposal_id is not null
      or p_accepted_proposal_version is not null then
     raise exception 'stale_loop_revision'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', null
       )::text;
@@ -468,7 +468,7 @@ begin
 
   if found then
     raise exception 'stale_loop_revision'
-      using errcode = '40001',
+      using errcode = 'PT409',
       detail = jsonb_build_object(
         'current_loop_revision', v_active_revision
       )::text;

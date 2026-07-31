@@ -225,7 +225,7 @@ select throws_ok(
     '[{"event_type":"sense_input_recorded","actor":"levi","perspective":"ul_levi_report","payload":{}}]'::jsonb,
     pg_temp.initial_state()
   )$$,
-  '40001', 'idempotency_fingerprint_conflict',
+  'PT409', 'idempotency_fingerprint_conflict',
   'same event ID plus different action conflicts'
 );
 select throws_ok(
@@ -235,7 +235,7 @@ select throws_ok(
     '[{"event_type":"loop_created","actor":"system","perspective":"lr_system_evidence","payload":{}}]'::jsonb,
     pg_temp.initial_state()
   )$$,
-  '40001', 'idempotency_fingerprint_conflict',
+  'PT409', 'idempotency_fingerprint_conflict',
   'same event ID plus different payload conflicts'
 );
 select throws_ok(
@@ -245,7 +245,7 @@ select throws_ok(
     '[{"event_type":"loop_created","actor":"system","perspective":"lr_system_evidence","payload":{}}]'::jsonb,
     pg_temp.initial_state()
   )$$,
-  '40001', 'idempotency_fingerprint_conflict',
+  'PT409', 'idempotency_fingerprint_conflict',
   'same event ID plus different expected revision conflicts'
 );
 
@@ -353,7 +353,7 @@ select throws_ok(
     (select o.result->'loop'->>'loop_id' from opened as o),
     (select pbs.state::text from proposal_b_state as pbs)
   ),
-  '40001', 'stale_proposal',
+  'PT409', 'stale_proposal',
   'acceptance naming superseded proposal A is rejected'
 );
 select is(
@@ -524,7 +524,7 @@ select throws_ok(
     (select so.result->'loop'->>'loop_id' from second_open as so),
     (select so.result->'loop' from second_open as so)::text
   ),
-  '40001', 'idempotency_fingerprint_conflict',
+  'PT409', 'idempotency_fingerprint_conflict',
   'same event ID reused for another loop conflicts'
 );
 select is(
