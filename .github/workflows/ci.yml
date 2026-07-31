@@ -99,7 +99,7 @@ jobs:
           SSMM_PURPOSE_LABEL=CI purpose
           SSMM_ORIENTATION_ID=ci-orientation
           SSMM_ORIENTATION_LABEL=CI orientation
-          SSMM_SHAPE_ENDPOINT=http://127.0.0.1:55430/v1/chat/completions
+          SSMM_SHAPE_ENDPOINT=http://host.docker.internal:55430/v1/chat/completions
           SSMM_SHAPE_API_KEY=ci-unused-provider-key
           SSMM_SHAPE_MODEL=ci-mock-model
           ENV
@@ -172,7 +172,8 @@ jobs:
         run: |
           set -u
           supabase db reset --local
-          node tests/mock-shape-provider.mjs > /tmp/ssmm-mock-shape.log 2>&1 &
+          SSMM_MOCK_SHAPE_HOST=0.0.0.0 \
+            node tests/mock-shape-provider.mjs > /tmp/ssmm-mock-shape.log 2>&1 &
           mock_pid=$!
           supabase functions serve ssmm-runtime \
             --env-file supabase/functions/.env \
@@ -211,7 +212,11 @@ jobs:
             cat /tmp/ssmm-custody-probe.json || true
             exit 1
           fi
-          node tests/http-custody-flow.mjs
+          if ! node tests/http-custody-flow.mjs; then
+            cat /tmp/ssmm-mock-shape.log
+            cat /tmp/ssmm-custody-functions.log
+            exit 1
+          fi
 
       - name: Stop disposable local Supabase
         if: always()
