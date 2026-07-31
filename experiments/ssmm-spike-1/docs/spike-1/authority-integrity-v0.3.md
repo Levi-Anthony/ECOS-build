@@ -14,15 +14,18 @@ redesign recovery, create the iOS Shortcut, or authorize remote deployment.
 ## Loop revision
 
 `ssmm_spike1.main_loops.authoritative_revision` is a non-negative monotonic
-integer. A newly persisted loop begins at revision `1`. Every successful state
-mutation increments the revision exactly once in the same transaction as its
-events and projections. Rejected requests and read-only restoration do not
-increment it.
+integer. Before the focal loop exists, its expected revision is explicitly `0`.
+The first persisted creation mutation must supply `expected_loop_revision: 0`
+and returns a new loop at revision `1`. Every later successful state mutation
+increments the revision exactly once in the same transaction as its events and
+projections. Rejected requests and read-only restoration do not increment it.
 
-Every mutating runtime request supplies `expected_loop_revision`. The database
-locks the focal loop row and compares the supplied value with the current value
-before applying events or projections. A mismatch produces
-`stale_loop_revision` and rolls back without mutation.
+Every mutating runtime request supplies `expected_loop_revision`. For an
+existing loop, the database locks the focal loop row and compares the supplied
+value with the current value before applying events or projections. First-loop
+creation is serialized by a dedicated transaction lock and rejects any value
+other than `0`. A mismatch produces `stale_loop_revision` and rolls back without
+mutation.
 
 ## Proposal-bound acceptance and installation
 
@@ -114,12 +117,13 @@ proposal ID and version.
 `open_current_surface` is read-only when a persisted focal loop exists. It may
 omit `expected_loop_revision`, returns the current `loop_revision`, sets
 `receipt.persisted` to `false`, supplies no event ID, and does not increment the
-revision. Opening the first loop remains a persisted creation mutation and
-returns revision `1`.
+revision. When no focal loop exists, the same action is a creation mutation and
+must explicitly supply `expected_loop_revision: 0`; success returns revision
+`1`.
 
 ## Transaction order
 
-For a new mutation, `apply_runtime_events` performs this sequence:
+For an existing-loop mutation, `apply_runtime_events` performs this sequence:
 
 1. validate the canonical request and SHA-256 digest;
 2. serialize use of the client event ID and check the semantic request ledger;
@@ -132,5 +136,9 @@ For a new mutation, `apply_runtime_events` performs this sequence:
 9. persist the semantic request ledger and original response;
 10. commit atomically.
 
-Any conflict occurs before step 6 and leaves all authority-bearing tables
+First-loop creation follows the same sequence except that it serializes focal
+loop creation, validates expected revision `0`, creates the loop, and then
+advances it once to revision `1`.
+
+Any conflict occurs before persistence and leaves all authority-bearing tables
 unchanged.

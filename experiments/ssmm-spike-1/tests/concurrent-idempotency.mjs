@@ -28,7 +28,7 @@ const rows = async (path) => (await (await fetch(`${env.API_URL}/rest/v1/${path}
 const close = async (loopId) => { const r = await fetch(`${env.API_URL}/rest/v1/main_loops?id=eq.${loopId}`, { method: "PATCH", headers: { ...headers, prefer: "return=minimal" }, body: JSON.stringify({ loop_status: "closed", closed_at: new Date().toISOString() }) }); if (!r.ok) throw new Error(`fixture close failed ${r.status}`); };
 
 const proposedFixture = async (tag) => {
-  const open = await call({ loopId: null, eventId: `race-open-${tag}-${randomUUID()}`, action: "open_current_surface", events: [{ event_type: "loop_created", actor: "system", perspective: "lr_system_evidence", payload: {} }, { event_type: "sense_started", actor: "system", perspective: "lr_system_evidence", payload: {} }], next: initial() });
+  const open = await call({ loopId: null, eventId: `race-open-${tag}-${randomUUID()}`, action: "open_current_surface", expected: 0, events: [{ event_type: "loop_created", actor: "system", perspective: "lr_system_evidence", payload: {} }, { event_type: "sense_started", actor: "system", perspective: "lr_system_evidence", payload: {} }], next: initial() });
   if (open.status !== 200) throw new Error(`fixture open failed ${JSON.stringify(open)}`);
   const loopId = open.body.loop.loop_id;
   const p = proposal(randomUUID(), 1, "proposed", `Proposal ${tag}`);

@@ -9,12 +9,15 @@
 - Authority-integrity implementation commit: PR head after this change set
 - Base migration: `202607260001_ssmm_spike1_runtime.sql`
 - Authority-integrity migration: `202607310001_ssmm_spike1_authority_integrity.sql`
+- Explicit creation-revision migration: `202607310002_ssmm_spike1_creation_revision.sql`
 - Edge Function: `spike1-0.4.0`
 - Protocol version: `spike1-slice-contract-0.3`
 - Prompt version: `spike1-shape-0.3`
 - Shortcut version: not implemented
 - Path-card version: `slice-contract-0.2`
 - Authority-integrity contract: `authority-integrity-v0.3`
+- First-loop mutation contract: client supplies `expected_loop_revision: 0`; persisted loop returns revision `1`
+- Existing-loop re-entry contract: expected revision may be omitted and no mutation occurs
 - Future ECB/SSMM amendment: evidence-informed, non-governing
 - Reviewer:
 - Secrets verified: no remote secrets configured
@@ -23,7 +26,6 @@
 - Transactional revision and idempotency tests: required in CI
 - Different-request concurrency races: required in CI
 - HTTP conflict and read-only restoration tests: required in CI
-- Local HTTP custody path: retained and revision-aware
 - RLS enabled remotely: no
 - Access grants verified remotely: no
 - Remote project linked: no

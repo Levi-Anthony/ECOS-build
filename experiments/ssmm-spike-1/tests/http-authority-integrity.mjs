@@ -44,7 +44,7 @@ const count = async (path) => {
   return (await response.json()).length;
 };
 
-const opened = await directApply({ loopId: null, eventId: `http-seed-open-${randomUUID()}`, action: "open_current_surface", events: [{ event_type: "loop_created", actor: "system", perspective: "lr_system_evidence", payload: {} }, { event_type: "sense_started", actor: "system", perspective: "lr_system_evidence", payload: {} }], nextState: initialState() });
+const opened = await directApply({ loopId: null, eventId: `http-seed-open-${randomUUID()}`, action: "open_current_surface", expectedRevision: 0, events: [{ event_type: "loop_created", actor: "system", perspective: "lr_system_evidence", payload: {} }, { event_type: "sense_started", actor: "system", perspective: "lr_system_evidence", payload: {} }], nextState: initialState() });
 const loopId = opened.loop.loop_id;
 const proposalA = proposal(randomUUID(), 1, "proposed", "Proposal A");
 const proposedA = await directApply({ loopId, eventId: `http-seed-a-${randomUUID()}`, action: "request_shape_proposal", expectedRevision: 1, input: { sense_completion_basis: "enough" }, events: [{ event_type: "shape_proposal_created", actor: "runtime", perspective: "proposal", payload: {} }], nextState: { ...opened.loop, authoritative_phase: "shape", current_step: "shape_review", shape_proposals: [proposalA], proposed_shape: proposalA } });
