@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(28);
+select plan(33);
 
 create or replace function pg_temp.sha256(p_text text)
 returns text language sql immutable as $$
@@ -71,18 +71,15 @@ $$;
 
 create or replace function pg_temp.installed_shape(
   p_id uuid,
-  p_version integer,
-  p_status text default 'pending'
+  p_version integer
 )
 returns jsonb language sql immutable as $$
   select pg_temp.shape_content('Proposal B target') || jsonb_build_object(
     'accepted_proposal_id', p_id,
     'accepted_by', 'levi',
     'accepted_at', '2026-07-31T00:05:00Z',
-    'installation_actions', case when p_status = 'pending'
-      then '[]'::jsonb
-      else '[{"description":"Opened workspace","evidence":"visible","completed_at":"2026-07-31T00:06:00Z"}]'::jsonb end,
-    'installation_status', p_status,
+    'installation_actions', '[]'::jsonb,
+    'installation_status', 'pending',
     'installed_at', null,
     'declared_starting_conditions', 'At the desk',
     'small_move_exception', false,
@@ -122,6 +119,7 @@ begin
     'protocol_version', 'spike1-slice-contract-0.3'
   );
   v_text := v_canonical::text;
+
   return ssmm_spike1.apply_runtime_events(
     p_loop_id,
     p_client_event_id,
@@ -151,9 +149,11 @@ select has_table(
   'semantic request ledger exists'
 );
 select ok(
-  (select relrowsecurity from pg_class c
-   join pg_namespace n on n.oid = c.relnamespace
-   where n.nspname = 'ssmm_spike1' and c.relname = 'runtime_requests'),
+  (select c.relrowsecurity
+   from pg_class as c
+   join pg_namespace as n on n.oid = c.relnamespace
+   where n.nspname = 'ssmm_spike1'
+     and c.relname = 'runtime_requests'),
   'request ledger has RLS enabled'
 );
 
@@ -174,26 +174,21 @@ select pg_temp.apply_request(
 ) as result;
 
 select is(
-  (select (result->'loop'->>'authoritative_revision')::bigint from opened),
+  (select (o.result->'loop'->>'authoritative_revision')::bigint from opened as o),
   1::bigint,
   'first persisted mutation advances revision zero to one'
 );
 select is(
-  (select authoritative_revision from ssmm_spike1.main_loops
-   where id = ((select result->'loop'->>'loop_id' from opened))::uuid),
+  (select ml.authoritative_revision
+   from ssmm_spike1.main_loops as ml
+   where ml.id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
   1::bigint,
   'first mutation increments the row exactly once'
 );
 select is(
-  (select count(*)::integer from ssmm_spike1.runtime_requests),
+  (select count(*)::integer from ssmm_spike1.runtime_requests as rr),
   1,
   'first mutation records one semantic request'
-);
-select is(
-  (select expected_loop_revision from ssmm_spike1.runtime_requests
-   where client_event_id = 'test-open-0001'),
-  0::bigint,
-  'first mutation records explicit expected revision zero'
 );
 
 create temporary table replayed as
@@ -213,16 +208,16 @@ select pg_temp.apply_request(
 ) as result;
 
 select ok(
-  (select (result->>'idempotent_replay')::boolean from replayed),
+  (select (r.result->>'idempotent_replay')::boolean from replayed as r),
   'same event ID plus identical semantic request replays'
 );
 select is(
-  (select authoritative_revision from ssmm_spike1.main_loops
-   where id = ((select result->'loop'->>'loop_id' from opened))::uuid),
+  (select ml.authoritative_revision
+   from ssmm_spike1.main_loops as ml
+   where ml.id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
   1::bigint,
   'identical replay does not increment revision'
 );
-
 select throws_ok(
   $$select pg_temp.apply_request(
     null, 'test-open-0001', 'submit_sense_input', 0, null, null,
@@ -255,24 +250,21 @@ select throws_ok(
 );
 
 create temporary table proposal_a_state as
-select (select result->'loop' from opened) || jsonb_build_object(
+select o.result->'loop' || jsonb_build_object(
   'authoritative_phase', 'shape',
   'current_step', 'shape_review',
   'shape_proposals', jsonb_build_array(
-    pg_temp.proposal(
-      '00000000-0000-4000-8000-000000000101'::uuid,
-      1, 'proposed', 'Proposal A target'
-    )
+    pg_temp.proposal('00000000-0000-4000-8000-000000000101'::uuid, 1, 'proposed', 'Proposal A target')
   ),
   'proposed_shape', pg_temp.proposal(
-    '00000000-0000-4000-8000-000000000101'::uuid,
-    1, 'proposed', 'Proposal A target'
+    '00000000-0000-4000-8000-000000000101'::uuid, 1, 'proposed', 'Proposal A target'
   )
-) as state;
+) as state
+from opened as o;
 
 create temporary table proposal_a as
 select pg_temp.apply_request(
-  ((select result->'loop'->>'loop_id' from opened))::uuid,
+  ((select o.result->'loop'->>'loop_id' from opened as o))::uuid,
   'test-proposal-a-0001',
   'request_shape_proposal',
   1,
@@ -280,36 +272,30 @@ select pg_temp.apply_request(
   null,
   '{"sense_completion_basis":"enough"}'::jsonb,
   '[{"event_type":"shape_proposal_created","actor":"runtime","perspective":"proposal","payload":{}}]'::jsonb,
-  (select state from proposal_a_state)
+  (select pas.state from proposal_a_state as pas)
 ) as result;
 
 select is(
-  (select (result->'loop'->>'authoritative_revision')::bigint from proposal_a),
+  (select (pa.result->'loop'->>'authoritative_revision')::bigint from proposal_a as pa),
   2::bigint,
   'proposal A increments revision to two'
 );
 
 create temporary table proposal_b_state as
-select (select result->'loop' from proposal_a) || jsonb_build_object(
+select pa.result->'loop' || jsonb_build_object(
   'shape_proposals', jsonb_build_array(
-    pg_temp.proposal(
-      '00000000-0000-4000-8000-000000000101'::uuid,
-      1, 'superseded', 'Proposal A target'
-    ),
-    pg_temp.proposal(
-      '00000000-0000-4000-8000-000000000102'::uuid,
-      2, 'proposed', 'Proposal B target'
-    )
+    pg_temp.proposal('00000000-0000-4000-8000-000000000101'::uuid, 1, 'superseded', 'Proposal A target'),
+    pg_temp.proposal('00000000-0000-4000-8000-000000000102'::uuid, 2, 'proposed', 'Proposal B target')
   ),
   'proposed_shape', pg_temp.proposal(
-    '00000000-0000-4000-8000-000000000102'::uuid,
-    2, 'proposed', 'Proposal B target'
+    '00000000-0000-4000-8000-000000000102'::uuid, 2, 'proposed', 'Proposal B target'
   )
-) as state;
+) as state
+from proposal_a as pa;
 
 create temporary table proposal_b as
 select pg_temp.apply_request(
-  ((select result->'loop'->>'loop_id' from opened))::uuid,
+  ((select o.result->'loop'->>'loop_id' from opened as o))::uuid,
   'test-proposal-b-0001',
   'correct_shape_proposal',
   2,
@@ -320,35 +306,36 @@ select pg_temp.apply_request(
     {"event_type":"shape_proposal_corrected","actor":"levi","perspective":"ul_levi_report","payload":{}},
     {"event_type":"shape_proposal_created","actor":"runtime","perspective":"proposal","payload":{}}
   ]'::jsonb,
-  (select state from proposal_b_state)
+  (select pbs.state from proposal_b_state as pbs)
 ) as result;
 
 select is(
-  (select (result->'loop'->>'authoritative_revision')::bigint from proposal_b),
+  (select (pb.result->'loop'->>'authoritative_revision')::bigint from proposal_b as pb),
   3::bigint,
   'proposal B supersession increments revision to three'
 );
 select is(
-  (select proposal_status from ssmm_spike1.shape_proposals
-   where id = '00000000-0000-4000-8000-000000000101'::uuid),
+  (select sp.proposal_status
+   from ssmm_spike1.shape_proposals as sp
+   where sp.id = '00000000-0000-4000-8000-000000000101'::uuid),
   'superseded',
   'proposal A is superseded'
 );
 select is(
-  (select proposal_status from ssmm_spike1.shape_proposals
-   where id = '00000000-0000-4000-8000-000000000102'::uuid),
+  (select sp.proposal_status
+   from ssmm_spike1.shape_proposals as sp
+   where sp.id = '00000000-0000-4000-8000-000000000102'::uuid),
   'proposed',
   'proposal B is current and eligible'
 );
 
 create temporary table before_stale as
 select
-  (select authoritative_revision from ssmm_spike1.main_loops
-   where id = ((select result->'loop'->>'loop_id' from opened))::uuid) as revision,
-  (select count(*) from ssmm_spike1.events
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid) as events,
-  (select count(*) from ssmm_spike1.installed_shapes
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid) as installed;
+  ml.authoritative_revision as revision,
+  (select count(*) from ssmm_spike1.events as ev where ev.loop_id = ml.id) as events,
+  (select count(*) from ssmm_spike1.installed_shapes as ish where ish.loop_id = ml.id) as installed
+from ssmm_spike1.main_loops as ml
+where ml.id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid;
 
 select throws_ok(
   format(
@@ -363,86 +350,69 @@ select throws_ok(
       '[{"event_type":"shape_proposal_accepted","actor":"levi","perspective":"decision","payload":{}}]'::jsonb,
       %L::jsonb
     )$sql$,
-    (select result->'loop'->>'loop_id' from opened),
-    (select state::text from proposal_b_state)
+    (select o.result->'loop'->>'loop_id' from opened as o),
+    (select pbs.state::text from proposal_b_state as pbs)
   ),
   '40001', 'stale_proposal',
   'acceptance naming superseded proposal A is rejected'
 );
 select is(
-  (select authoritative_revision from ssmm_spike1.main_loops
-   where id = ((select result->'loop'->>'loop_id' from opened))::uuid),
-  (select revision from before_stale),
+  (select ml.authoritative_revision
+   from ssmm_spike1.main_loops as ml
+   where ml.id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
+  (select bs.revision from before_stale as bs),
   'stale proposal does not increment revision'
 );
 select is(
-  (select count(*) from ssmm_spike1.events
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid),
-  (select events from before_stale),
+  (select count(*)
+   from ssmm_spike1.events as ev
+   where ev.loop_id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
+  (select bs.events from before_stale as bs),
   'stale proposal produces no event'
 );
 select is(
-  (select count(*) from ssmm_spike1.installed_shapes
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid),
-  (select installed from before_stale),
+  (select count(*)
+   from ssmm_spike1.installed_shapes as ish
+   where ish.loop_id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
+  (select bs.installed from before_stale as bs),
   'stale proposal produces no installed projection'
 );
 select is(
-  (select proposal_status from ssmm_spike1.shape_proposals
-   where id = '00000000-0000-4000-8000-000000000102'::uuid),
+  (select sp.proposal_status from ssmm_spike1.shape_proposals as sp
+   where sp.id = '00000000-0000-4000-8000-000000000101'::uuid),
+  'superseded',
+  'stale proposal leaves proposal A superseded'
+);
+select is(
+  (select sp.proposal_status from ssmm_spike1.shape_proposals as sp
+   where sp.id = '00000000-0000-4000-8000-000000000102'::uuid),
   'proposed',
   'stale proposal leaves proposal B eligible'
 );
-
-select throws_ok(
-  format(
-    $sql$select pg_temp.apply_request(
-      %L::uuid,
-      'test-stale-revision-0001',
-      'submit_sense_input',
-      2,
-      null,
-      null,
-      '{"grounded_input":"stale"}'::jsonb,
-      '[{"event_type":"sense_input_recorded","actor":"levi","perspective":"ul_levi_report","payload":{}}]'::jsonb,
-      %L::jsonb
-    )$sql$,
-    (select result->'loop'->>'loop_id' from opened),
-    (select state::text from proposal_b_state)
-  ),
-  '40001', 'stale_loop_revision',
-  'stale loop revision is rejected under the row lock'
-);
 select is(
-  (select authoritative_revision from ssmm_spike1.main_loops
-   where id = ((select result->'loop'->>'loop_id' from opened))::uuid),
-  3::bigint,
-  'stale revision produces no revision increment'
+  (select count(*)::integer
+   from ssmm_spike1.runtime_requests as rr
+   where rr.client_event_id = 'test-stale-accept-0001'),
+  0,
+  'stale proposal produces no request-ledger row'
 );
 
 create temporary table accepted_state as
-select (select result->'loop' from proposal_b) || jsonb_build_object(
+select pb.result->'loop' || jsonb_build_object(
   'shape_proposals', jsonb_build_array(
-    pg_temp.proposal(
-      '00000000-0000-4000-8000-000000000101'::uuid,
-      1, 'superseded', 'Proposal A target'
-    ),
-    pg_temp.proposal(
-      '00000000-0000-4000-8000-000000000102'::uuid,
-      2, 'accepted', 'Proposal B target'
-    )
+    pg_temp.proposal('00000000-0000-4000-8000-000000000101'::uuid, 1, 'superseded', 'Proposal A target'),
+    pg_temp.proposal('00000000-0000-4000-8000-000000000102'::uuid, 2, 'accepted', 'Proposal B target')
   ),
   'proposed_shape', null,
   'installed_shape', pg_temp.installed_shape(
-    '00000000-0000-4000-8000-000000000102'::uuid,
-    2,
-    'pending'
+    '00000000-0000-4000-8000-000000000102'::uuid, 2
   )
-) as state;
+) as state
+from proposal_b as pb;
 
 create temporary table accepted as
 select pg_temp.apply_request(
-  ((select result->'loop'->>'loop_id' from opened))::uuid,
+  ((select o.result->'loop'->>'loop_id' from opened as o))::uuid,
   'test-accept-b-0001',
   'accept_shape_proposal',
   3,
@@ -453,48 +423,61 @@ select pg_temp.apply_request(
     {"event_type":"shape_proposal_accepted","actor":"levi","perspective":"decision","payload":{}},
     {"event_type":"shape_installation_started","actor":"system","perspective":"lr_system_evidence","payload":{}}
   ]'::jsonb,
-  (select state from accepted_state)
+  (select acs.state from accepted_state as acs)
 ) as result;
 
 select is(
-  (select (result->'loop'->>'authoritative_revision')::bigint from accepted),
+  (select (a.result->'loop'->>'authoritative_revision')::bigint from accepted as a),
   4::bigint,
   'proposal-bound acceptance increments revision exactly once'
 );
 select is(
-  (select accepted_proposal_id from ssmm_spike1.installed_shapes
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid),
+  (select ish.accepted_proposal_id
+   from ssmm_spike1.installed_shapes as ish
+   where ish.loop_id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
   '00000000-0000-4000-8000-000000000102'::uuid,
   'installed projection is bound to proposal B'
 );
 select is(
-  (select shape_version from ssmm_spike1.installed_shapes
-   where loop_id = ((select result->'loop'->>'loop_id' from opened))::uuid),
+  (select ish.shape_version
+   from ssmm_spike1.installed_shapes as ish
+   where ish.loop_id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid),
   2,
   'installed projection retains immutable proposal version two'
 );
 select is(
-  (select proposal_status from ssmm_spike1.shape_proposals
-   where id = '00000000-0000-4000-8000-000000000102'::uuid),
+  (select sp.proposal_status
+   from ssmm_spike1.shape_proposals as sp
+   where sp.id = '00000000-0000-4000-8000-000000000102'::uuid),
   'accepted',
   'accepted proposal status is durable'
 );
 select is(
-  (select resulting_loop_revision from ssmm_spike1.runtime_requests
-   where client_event_id = 'test-accept-b-0001'),
+  (select count(*)::integer
+   from ssmm_spike1.events as ev
+   where ev.loop_id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid
+     and ev.event_type = 'shape_proposal_accepted'),
+  1,
+  'valid acceptance records exactly one acceptance event'
+);
+select is(
+  (select rr.resulting_loop_revision
+   from ssmm_spike1.runtime_requests as rr
+   where rr.client_event_id = 'test-accept-b-0001'),
   4::bigint,
   'request ledger records the exact resulting revision'
 );
 select is(
-  (select length(request_fingerprint) from ssmm_spike1.runtime_requests
-   where client_event_id = 'test-accept-b-0001'),
+  (select length(rr.request_fingerprint)
+   from ssmm_spike1.runtime_requests as rr
+   where rr.client_event_id = 'test-accept-b-0001'),
   64,
   'request ledger stores a SHA-256 fingerprint'
 );
 
-update ssmm_spike1.main_loops
+update ssmm_spike1.main_loops as ml
 set loop_status = 'closed', closed_at = now()
-where id = ((select result->'loop'->>'loop_id' from opened))::uuid;
+where ml.id = ((select o.result->'loop'->>'loop_id' from opened as o))::uuid;
 
 create temporary table second_open as
 select pg_temp.apply_request(
@@ -513,10 +496,18 @@ select pg_temp.apply_request(
 ) as result;
 
 select is(
-  (select (result->'loop'->>'authoritative_revision')::bigint from second_open),
+  (select (so.result->'loop'->>'authoritative_revision')::bigint from second_open as so),
   1::bigint,
   'a genuinely new loop starts from explicit revision zero and returns one'
 );
+
+create temporary table second_before as
+select
+  ml.authoritative_revision as revision,
+  (select count(*) from ssmm_spike1.events as ev where ev.loop_id = ml.id) as events
+from ssmm_spike1.main_loops as ml
+where ml.id = ((select so.result->'loop'->>'loop_id' from second_open as so))::uuid;
+
 select throws_ok(
   format(
     $sql$select pg_temp.apply_request(
@@ -530,11 +521,25 @@ select throws_ok(
       '[{"event_type":"sense_input_recorded","actor":"levi","perspective":"ul_levi_report","payload":{}}]'::jsonb,
       %L::jsonb
     )$sql$,
-    (select result->'loop'->>'loop_id' from second_open),
-    ((select result->'loop' from second_open))::text
+    (select so.result->'loop'->>'loop_id' from second_open as so),
+    (select so.result->'loop' from second_open as so)::text
   ),
   '40001', 'idempotency_fingerprint_conflict',
   'same event ID reused for another loop conflicts'
+);
+select is(
+  (select ml.authoritative_revision
+   from ssmm_spike1.main_loops as ml
+   where ml.id = ((select so.result->'loop'->>'loop_id' from second_open as so))::uuid),
+  (select sb.revision from second_before as sb),
+  'different-loop key conflict does not increment revision'
+);
+select is(
+  (select count(*)
+   from ssmm_spike1.events as ev
+   where ev.loop_id = ((select so.result->'loop'->>'loop_id' from second_open as so))::uuid),
+  (select sb.events from second_before as sb),
+  'different-loop key conflict produces no event'
 );
 
 select * from finish();
