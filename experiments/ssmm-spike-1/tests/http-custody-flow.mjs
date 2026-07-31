@@ -17,7 +17,9 @@ const invoke = async (action, input = {}, explicitLoopId = loopId, options = {})
     action,
     client_event_id: clientEventId,
     loop_id: explicitLoopId,
-    expected_loop_revision: action === "open_current_surface" ? null : (options.expectedRevision ?? loopRevision),
+    expected_loop_revision: action === "open_current_surface"
+      ? (explicitLoopId === null ? 0 : null)
+      : (options.expectedRevision ?? loopRevision),
     ...(proposalIdentity ? { accepted_proposal_id: proposalIdentity.id, accepted_proposal_version: proposalIdentity.proposal_version } : {}),
     input,
     client: { source: "direct_test", shortcut_version: "http-custody-flow-v0.3" },
