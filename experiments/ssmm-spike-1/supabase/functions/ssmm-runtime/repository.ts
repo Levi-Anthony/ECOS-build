@@ -1,4 +1,5 @@
-import type { Handle } from "./contracts.ts";
+import type { Handle, RuntimeRequest } from "./contracts.ts";
+import type { RuntimeRequestFingerprint } from "./request-fingerprint.ts";
 import type { MainLoopState, Transition } from "./state-machine.ts";
 
 export type RepositoryConfig = {
@@ -6,9 +7,13 @@ export type RepositoryConfig = {
   serviceRoleKey: string;
 };
 
+export type RevisionedLoopState = MainLoopState & {
+  authoritative_revision: number;
+};
+
 export type PersistedResult = {
   idempotent_replay: boolean;
-  loop: MainLoopState;
+  loop: RevisionedLoopState;
   events: Array<{
     id: string;
     client_event_id: string;
@@ -59,15 +64,20 @@ const rpc = async (
     body: JSON.stringify(body),
   });
 
-export function toState(value: unknown): MainLoopState {
+export function toState(value: unknown): RevisionedLoopState {
   if (!value || typeof value !== "object") {
     throw new Error("loop_state_incomplete");
   }
-  const row = value as Partial<MainLoopState>;
+  const row = value as Partial<RevisionedLoopState>;
+  const revision = Number(row.authoritative_revision ?? 0);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error("loop_revision_incomplete");
+  }
   return {
     loop_id: row.loop_id ?? null,
     loop_status: row.loop_status ?? "active",
     authoritative_phase: row.authoritative_phase ?? "sense",
+    authoritative_revision: revision,
     current_step: row.current_step ?? "sense_entry",
     working_state: row.working_state ?? {},
     purpose_handle: row.purpose_handle as Handle,
@@ -91,45 +101,81 @@ export function toState(value: unknown): MainLoopState {
   };
 }
 
+const toPersistedResult = (value: unknown): PersistedResult => {
+  if (!value || typeof value !== "object") {
+    throw new Error("persistence_result_incomplete");
+  }
+  const result = value as Record<string, unknown>;
+  if (!Array.isArray(result.events)) {
+    throw new Error("persistence_events_incomplete");
+  }
+  return {
+    idempotent_replay: result.idempotent_replay === true,
+    loop: toState(result.loop),
+    events: result.events as PersistedResult["events"],
+  };
+};
+
 export async function getLoop(
   config: RepositoryConfig,
   loopId: string,
-): Promise<MainLoopState | null> {
+): Promise<RevisionedLoopState | null> {
   const result = await rpc(config, "get_loop_state", { p_loop_id: loopId });
   return result ? toState(result) : null;
 }
 
 export async function getCurrentLoop(
   config: RepositoryConfig,
-): Promise<MainLoopState | null> {
+): Promise<RevisionedLoopState | null> {
   const result = await rpc(config, "get_current_loop_state", {});
   return result ? toState(result) : null;
 }
 
 export async function getLatestLoop(
   config: RepositoryConfig,
-): Promise<MainLoopState | null> {
+): Promise<RevisionedLoopState | null> {
   const result = await rpc(config, "get_latest_loop_state", {});
   return result ? toState(result) : null;
 }
 
+export async function lookupRuntimeRequest(
+  config: RepositoryConfig,
+  clientEventId: string,
+  fingerprint: RuntimeRequestFingerprint,
+): Promise<PersistedResult | null> {
+  const result = await rpc(config, "check_runtime_request", {
+    p_client_event_id: clientEventId,
+    p_request_canonical: fingerprint.canonical,
+    p_request_canonical_text: fingerprint.canonicalText,
+    p_request_fingerprint: fingerprint.sha256,
+  });
+  return result ? toPersistedResult(result) : null;
+}
+
 export async function persistTransition(
   config: RepositoryConfig,
-  loopId: string | null,
-  clientEventId: string,
+  requestInput: RuntimeRequest,
   source: string,
   protocolVersion: string,
   promptVersion: string,
+  fingerprint: RuntimeRequestFingerprint,
   transition: Transition,
 ): Promise<PersistedResult> {
-  return await rpc(config, "apply_runtime_events", {
-    p_loop_id: loopId,
-    p_client_event_id: clientEventId,
+  return toPersistedResult(await rpc(config, "apply_runtime_events", {
+    p_loop_id: requestInput.loop_id,
+    p_client_event_id: requestInput.client_event_id,
+    p_action: requestInput.action,
+    p_request_canonical: fingerprint.canonical,
+    p_request_canonical_text: fingerprint.canonicalText,
+    p_request_fingerprint: fingerprint.sha256,
+    p_expected_loop_revision: requestInput.expected_loop_revision ?? null,
+    p_accepted_proposal_id: requestInput.accepted_proposal_id ?? null,
+    p_accepted_proposal_version: requestInput.accepted_proposal_version ?? null,
     p_events: transition.events,
     p_protocol_version: protocolVersion,
     p_prompt_version: promptVersion,
     p_invocation_source: source,
     p_next_state: transition.next,
     p_close_loop: transition.close_loop ?? false,
-  }) as PersistedResult;
+  }));
 }

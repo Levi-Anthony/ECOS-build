@@ -1,9 +1,10 @@
 # SSMM Spike 1
 
-Status: revised executable contract implemented locally
+Status: revised local implementation; remote and human-field gates remain closed
 
-This directory implements Slice Contract v0.2 without changing the live ECB
-substrate or ratifying a generalized loop ontology.
+This directory implements Slice Contract v0.2 plus the bounded authority
+integrity amendment v0.3 without changing the live ECB substrate or ratifying a
+generalized loop ontology.
 
 The core claim is:
 
@@ -25,52 +26,50 @@ parent loop—not a generic phase menu and not a fresh Sense.
 - Git branch: `codex/eco-70-ssmm-spike-1`
 - Draft review: GitHub PR `#19`
 - Authority: Linear coordinates; Git holds implementation evidence; ECB holds
-  continuity. Slice Contract v0.2 governs this spike pending field evidence.
+  continuity. Slice Contract v0.2 governs the spike, amended only by the bounded
+  authority-integrity contract in
+  [`authority-integrity-v0.3.md`](docs/spike-1/authority-integrity-v0.3.md).
 
 ## Runtime model
 
 The persistence layer separates:
 
-- the authoritative `main_loop`;
+- the authoritative `main_loop` with a monotonic revision;
 - corrigible `sense_state`;
 - versioned, non-authoritative `shape_proposals`;
 - the accepted and installed `installed_shape`;
 - durable `move_custody`;
 - one explicit `adjustment_subloop` mechanism inside Move;
 - `metabolize_state`;
-- append-only authoritative events.
+- authoritative events;
+- a semantic request ledger for meaning-bound idempotency.
 
-Acceptance and installation are distinct. `shape_installed` and
-`parent_entered_move` occur only after installation requirements are satisfied
-or explicitly waived. Completion claims and verification assessments are also
-distinct records.
+Acceptance and installation are distinct. Acceptance, installation actions, and
+installation confirmation must name the exact proposal ID and immutable version.
+Every state mutation supplies the loop revision it was computed from; the
+database rejects stale requests under the loop-row lock. Reusing an event ID
+with different semantic content is a conflict, not a replay.
 
 ## Local verification
 
+From `experiments/ssmm-spike-1`:
+
 ```sh
-deno test supabase/functions/ssmm-runtime --allow-env
 deno check supabase/functions/ssmm-runtime/index.ts
-supabase db reset --local --no-seed
+deno test supabase/functions/ssmm-runtime --allow-env
+supabase start
+supabase db reset --local
 supabase test db
 node tests/concurrent-idempotency.mjs
+SSMM_RUNTIME_SHARED_SECRET=... node tests/http-authority-integrity.mjs
 node --env-file=/path/to/local-test.env tests/http-custody-flow.mjs
 supabase db lint --level warning
 ```
 
-Current evidence:
-
-- 24/24 Deno tests pass.
-- 27/27 pgTAP assertions pass.
-- concurrent identical requests produce one write and one replay;
-- a local HTTP path preserves a non-authoritative proposal through correction
-  and installation, restores the same parent Move in a later request, runs
-  bounded assistance without changing the parent phase, keeps completion
-  separate from verification, and gives a fresh Sense the prior residue
-  without selecting its Move;
-- database lint reports no findings in `ssmm_spike1` (the bundled pgTAP
-  extension emits its own compatibility findings).
-
-This proves local implementation behavior. It does not prove the product claim.
+The dedicated CI job `ssmm-spike-1-authority-integrity` runs the deterministic
+unit checks, pgTAP suite, different-request concurrency races, and HTTP conflict
+and read-only-restoration tests against disposable local Supabase. Local or CI
+evidence does not prove the product claim.
 
 ## Future promotion seam
 
@@ -82,8 +81,8 @@ answers what is happening now and what transition is legal.
 This is a non-governing promotion direction, not a Spike 1 prerequisite.
 Semantic memory must never be used to infer current loop state, and runtime
 events become thoughts only after Metabolize yields human-confirmed durable
-meaning. See
-[the future ECB semantic-memory amendment](docs/spike-1/future-ecb-semantic-memory-amendment.md).
+meaning. See the
+[future ECB semantic-memory amendment](docs/spike-1/future-ecb-semantic-memory-amendment.md).
 
 ## Reality gate
 
@@ -101,6 +100,7 @@ A review-complete field test still requires:
    the field.
 10. Falsifier assessment and review packet.
 
+The reserved remote project is not linked or used by this repository change.
 A test without leaving and returning during Move does not test custody of the
 execution gap. A test without Metabolize and residue does not test whether the
 result lands.

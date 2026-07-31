@@ -1,6 +1,6 @@
-export const PROTOCOL_VERSION = "spike1-slice-contract-0.2";
+export const PROTOCOL_VERSION = "spike1-slice-contract-0.3";
 export const PROMPT_VERSION = "spike1-shape-0.3";
-export const FUNCTION_VERSION = "spike1-0.3.0";
+export const FUNCTION_VERSION = "spike1-0.4.0";
 
 export const actions = [
   "open_current_surface",
@@ -179,6 +179,9 @@ export type RuntimeRequest = {
   action: Action;
   client_event_id: string;
   loop_id: string | null;
+  expected_loop_revision?: number | null;
+  accepted_proposal_id?: string | null;
+  accepted_proposal_version?: number | null;
   input: Record<string, unknown>;
   client: {
     source: "ios_action_button" | "direct_test";
@@ -202,6 +205,7 @@ export type Interaction = {
 
 export type RuntimeResponse = {
   loop_id: string;
+  loop_revision: number;
   loop_status: LoopStatus;
   authoritative_phase: AuthoritativePhase;
   interaction: Interaction;
@@ -219,9 +223,9 @@ export type RuntimeResponse = {
   available_actions: Action[];
   correction_action: Action | null;
   receipt: {
-    event_id: string;
+    event_id: string | null;
     client_event_id: string;
-    persisted: true;
+    persisted: boolean;
     idempotent_replay: boolean;
   };
   versions: {
@@ -231,12 +235,37 @@ export type RuntimeResponse = {
   };
 };
 
+export const conflictCategories = [
+  "stale_loop_revision",
+  "stale_proposal",
+  "idempotency_fingerprint_conflict",
+] as const;
+export type ConflictCategory = (typeof conflictCategories)[number];
+
+export type RuntimeConflictResponse = {
+  error: "conflict";
+  category: ConflictCategory;
+  current_loop_revision: number | null;
+  current_proposal_id?: string | null;
+  current_proposal_version?: number | null;
+};
+
+const proposalBoundActions = new Set<Action>([
+  "accept_shape_proposal",
+  "record_installation_action",
+  "confirm_shape_installed",
+]);
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export function parseRequest(value: unknown): RuntimeRequest {
   if (!value || typeof value !== "object") throw new Error("invalid_request");
   const request = value as Record<string, unknown>;
   if (!actions.includes(request.action as Action)) {
     throw new Error("invalid_action");
   }
+  const action = request.action as Action;
   if (
     typeof request.client_event_id !== "string" ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(request.client_event_id)
@@ -246,7 +275,7 @@ export function parseRequest(value: unknown): RuntimeRequest {
   if (request.loop_id !== null && typeof request.loop_id !== "string") {
     throw new Error("invalid_loop_id");
   }
-  if (!request.input || typeof request.input !== "object") {
+  if (!request.input || typeof request.input !== "object" || Array.isArray(request.input)) {
     throw new Error("invalid_input");
   }
   if (Object.hasOwn(request.input, "install")) {
@@ -259,10 +288,62 @@ export function parseRequest(value: unknown): RuntimeRequest {
   if (!["ios_action_button", "direct_test"].includes(String(client.source))) {
     throw new Error("invalid_client_source");
   }
-  if (typeof client.shortcut_version !== "string") {
+  if (typeof client.shortcut_version !== "string" || !client.shortcut_version) {
     throw new Error("invalid_client_version");
   }
-  return value as RuntimeRequest;
+
+  const expected = request.expected_loop_revision;
+  if (action !== "open_current_surface") {
+    if (!Number.isSafeInteger(expected) || Number(expected) < 0) {
+      throw new Error("expected_loop_revision_required");
+    }
+  } else if (
+    expected !== undefined && expected !== null &&
+    (!Number.isSafeInteger(expected) || Number(expected) < 0)
+  ) {
+    throw new Error("invalid_expected_loop_revision");
+  }
+
+  const requiresProposalIdentity = proposalBoundActions.has(action);
+  if (requiresProposalIdentity) {
+    if (
+      typeof request.accepted_proposal_id !== "string" ||
+      !uuidPattern.test(request.accepted_proposal_id)
+    ) {
+      throw new Error("accepted_proposal_id_required");
+    }
+    if (
+      !Number.isSafeInteger(request.accepted_proposal_version) ||
+      Number(request.accepted_proposal_version) <= 0
+    ) {
+      throw new Error("accepted_proposal_version_required");
+    }
+  } else if (
+    request.accepted_proposal_id !== undefined ||
+    request.accepted_proposal_version !== undefined
+  ) {
+    throw new Error("unexpected_proposal_identity");
+  }
+
+  return {
+    action,
+    client_event_id: request.client_event_id,
+    loop_id: request.loop_id as string | null,
+    expected_loop_revision: action === "open_current_surface"
+      ? (expected === undefined ? null : expected as number | null)
+      : Number(expected),
+    accepted_proposal_id: requiresProposalIdentity
+      ? request.accepted_proposal_id as string
+      : null,
+    accepted_proposal_version: requiresProposalIdentity
+      ? Number(request.accepted_proposal_version)
+      : null,
+    input: request.input as Record<string, unknown>,
+    client: {
+      source: client.source as "ios_action_button" | "direct_test",
+      shortcut_version: client.shortcut_version,
+    },
+  };
 }
 
 const requireString = (shape: Record<string, unknown>, field: string) => {

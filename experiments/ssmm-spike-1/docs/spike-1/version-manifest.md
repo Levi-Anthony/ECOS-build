@@ -1,30 +1,32 @@
 # Spike 1 Version Manifest
 
-- Review date: `2026-07-26`
+- Review date: `2026-07-31`
 - Linear issue: `ECO-70` (child of `ECO-61`)
 - Git branch: `codex/eco-70-ssmm-spike-1`
-- Supabase project:
-- Verified implementation commit: `cfa7a6d`
-- Future-plan amendment commit: `c18738b`
-- Migration: `202607260001_ssmm_spike1_runtime.sql`
-- Edge Function: `spike1-0.3.0`
-- Protocol version: `spike1-slice-contract-0.2`
+- Supabase project: reserved but intentionally unlinked and unused
+- Reserved project reference: `itqjtjcsjwvzxcowhqyt`
+- Prior implementation commit: `a5d4fb4f8fcc8162bd593090db4177adfdde0728`
+- Authority-integrity implementation commit: PR head after this change set
+- Base migration: `202607260001_ssmm_spike1_runtime.sql`
+- Authority-integrity migration: `202607310001_ssmm_spike1_authority_integrity.sql`
+- Edge Function: `spike1-0.4.0`
+- Protocol version: `spike1-slice-contract-0.3`
 - Prompt version: `spike1-shape-0.3`
-- Shortcut version: `spike1-0.1`
+- Shortcut version: not implemented
 - Path-card version: `slice-contract-0.2`
-- Test-plan version: `slice-contract-0.2`
+- Authority-integrity contract: `authority-integrity-v0.3`
 - Future ECB/SSMM amendment: evidence-informed, non-governing
 - Reviewer:
-- Secrets verified: no
-- Clean local migration reset: yes
-- Local runtime tests: 24 passed
-- Local database tests: 27 passed
-- Concurrent retry race: passed
-- Local HTTP custody path: passed
-- Database lint: no `ssmm_spike1` findings; pgTAP extension findings remain
+- Secrets verified: no remote secrets configured
+- Clean local migration reset: required in CI
+- Deterministic request-fingerprint tests: required in CI
+- Transactional revision and idempotency tests: required in CI
+- Different-request concurrency races: required in CI
+- HTTP conflict and read-only restoration tests: required in CI
+- Local HTTP custody path: retained and revision-aware
 - RLS enabled remotely: no
 - Access grants verified remotely: no
-- Service-role BYPASSRLS behavior acknowledged: yes
+- Remote project linked: no
 - Retry idempotency verified remotely: no
 - Real field test completed: no
 - Review packet complete: no
