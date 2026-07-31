@@ -22,7 +22,7 @@ create table ssmm_spike1.runtime_requests (
   check (
     (accepted_proposal_id is null and accepted_proposal_version is null)
     or
-    (accepted_proposal_id is not null and accepted_proposal_version > 0)
+    (accepted_proposal_id is not null and accepted_proposal_version is not null and accepted_proposal_version > 0)
   )
 );
 
