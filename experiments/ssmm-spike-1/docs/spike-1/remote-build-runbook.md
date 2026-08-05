@@ -14,7 +14,9 @@ Before any command in this runbook is executed, the Site Packet must identify:
 - capability receipt covering the exact remote operation;
 - target project `ssmm-spike-1`;
 - target project ref `itqjtjcsjwvzxcowhqyt`;
-- rollback source and ordered recovery commands;
+- reviewed rollback source at
+  `supabase/rollback/rollback_ssmm_spike1.sql`, the guarded orchestrator at
+  `scripts/ssmm-stage3-rollback.sh`, and green local rollback evidence;
 - Levi-ratified Shape provider endpoint and model;
 - reviewed client-authentication architecture;
 - reviewed decision on platform JWT verification and any `--no-verify-jwt` use;
@@ -58,7 +60,7 @@ Safety rationale: isolated Spike 1 evidence
 Production affected: no
 Legacy ECB/OB1 affected: no
 Crucible affected: no
-Rollback identifier: <identifier or not-applicable>
+Rollback identifier: $ROLLBACK_ID (human receipt; required for mutation)
 ```
 
 Resolve the linked ref from `supabase/.temp/project-ref`; do not infer it from
@@ -186,20 +188,154 @@ The remote handoff test uses an ignored environment file containing only the
 approved function URL and direct-test credential. It must never receive a
 service-role key.
 
-## 7. Evidence and rollback receipt
+## 7. Rollback readiness — separately gated
 
-Record only:
+Rollback is a remote mutation batch. Neither this runbook nor a successful
+deployment receipt authorizes it implicitly. The rollback receipt must name:
 
-- project ref;
-- reviewed Git commit;
-- migration versions and remote history;
-- function deployment ID/version;
-- provider and ratified model names;
-- non-sensitive secret fingerprints or configuration status;
-- loop, proposal, event, and revision identifiers;
-- test, lint, denial-path, and replay results;
-- timestamps, drift, failures, and falsifier observations;
-- rollback identifier and recovery result.
+- project ref `itqjtjcsjwvzxcowhqyt`;
+- the exact deployed commit and rollback identifier;
+- the Stage 2B baseline identifier `stage2b-empty-20260804`;
+- function deletion, secret unsetting, rollback SQL, migration-history repair,
+  schema/role dumps, function/secret/table inventory, and dry-run verification;
+- a protected evidence directory outside Git.
+
+The reviewed artifacts are:
+
+```text
+supabase/rollback/rollback_ssmm_spike1.sql
+supabase/rollback/verify_stage2b_baseline.sql
+scripts/ssmm-stage3-rollback.sh
+scripts/validate-rollback-evidence.mjs
+tests/rollback-readiness.mjs
+tests/rollback-readiness.sh
+```
+
+The database rollback is transactional, uses only `RESTRICT`, refuses
+unexplained relations/routines/policies/triggers/types, removes the dedicated
+`ssmm_spike1` schema in dependency order, and never drops `pgcrypto` or another
+platform extension. It is valid after any applied prefix of the four forward
+migrations.
+
+### 7.1 Predeployment rollback rehearsal
+
+Run locally before requesting Stage 3:
+
+```sh
+supabase start
+bash tests/rollback-readiness.sh
+scripts/ssmm-stage3-rollback.sh plan
+```
+
+The test resets through each forward-migration prefix, executes rollback and
+baseline verification, proves that an unexpected table blocks rollback, marks
+the four local migration rows reverted, confirms the dry-run order, reapplies
+all four migrations, and reruns pgTAP.
+
+### 7.2 Exact remote rollback command
+
+Only under a receipt authorizing every mutation and read in Section 7:
+
+```sh
+DEPLOYED_COMMIT="$(git rev-parse HEAD)"
+ROLLBACK_ID="<human-authorized-rollback-id>"
+EVIDENCE_DIR="/private/tmp/ssmm-stage3-rollback-${ROLLBACK_ID}"
+mkdir -p "$EVIDENCE_DIR"
+chmod 700 "$EVIDENCE_DIR"
+
+scripts/ssmm-stage3-rollback.sh execute \
+  --project-ref itqjtjcsjwvzxcowhqyt \
+  --rollback-id "$ROLLBACK_ID" \
+  --deployed-commit "$DEPLOYED_COMMIT" \
+  --evidence-dir "$EVIDENCE_DIR" \
+  --confirm-baseline stage2b-empty-20260804
+```
+
+`ROLLBACK_ID` is the value issued by the human receipt; it is not generated or
+inferred by the operator. The script requires Supabase CLI `2.109.1`, the exact
+linked ref, the exact deployed commit, and a clean worktree. A different CLI
+version or target is a stop condition requiring review, not an upgrade prompt.
+
+### 7.3 Ordered behavior and partial-deployment recovery
+
+The guarded command always reconciles in this order:
+
+1. List deployed functions and secret names. Stop before mutation if any slug
+   other than `ssmm-runtime` or any name outside the eight-name allowlist exists.
+2. Delete `ssmm-runtime` if present. For the documented empty prestate, removal
+   is the exact function recovery action; there is no prior deployment to
+   restore.
+3. Execute `rollback_ssmm_spike1.sql` through `supabase db query --linked`.
+4. Run exactly:
+
+   ```sh
+   supabase migration repair \
+     202607260001 202607310001 202607310002 202607310003 \
+     --status reverted --linked
+   ```
+
+5. Unset only allowlisted SSMM names that were present in the preflight. Values
+   are never retrieved. Delaying this irreversible step until database/history
+   recovery succeeds preserves configuration if SQL or repair stops.
+6. Verify SSMM absence, empty function/secret/table inventories, exact schema
+   and role hashes from Stage 2B, and a dry-run containing exactly the four
+   forward migrations in order.
+
+This one order handles every authorized partial state:
+
+| Failure point | Expected observed state | Recovery behavior |
+|---|---|---|
+| Before database push | no SSMM schema, secrets, or function | all steps are verified no-ops; migration repair remains bounded to the four versions |
+| During/after a migration prefix | partial/full SSMM schema, no function | allowlisted SQL removes the applied prefix; history is marked reverted |
+| After secret configuration | SSMM schema plus a subset/all eight names | database/history are reversed, then only present SSMM names are unset |
+| After function deployment | function may still accept traffic | function is deleted first, then database/history and secrets are reversed |
+| After a success-path smoke | SSMM test rows exist inside the dedicated schema | schema removal deletes those rows; the receipt must acknowledge this intended data loss |
+| After SQL succeeds but history repair fails | SSMM schema absent, history may still show applied versions | do not redeploy; rerun only the exact authorized repair and full verification |
+
+If a previous function ever exists in a future non-empty baseline, this script
+must not be reused as-is. Capture that source/version under a new read receipt,
+add a reviewed restore path, update the baseline identifier and hashes, and
+obtain new authorization. For the verified Stage 2B baseline the prior state is
+function absence, so redeploying any function during rollback would be drift.
+
+### 7.4 Stop conditions
+
+Stop without mutation if identity, link, commit, worktree, CLI version, baseline
+identifier, or receipt differs. Stop before deletion if function or secret-name
+inventory contains anything outside the allowlists. The SQL stops atomically on
+an unexplained SSMM object or any external dependency because every drop uses
+`RESTRICT`. Stop after any command failure; do not improvise `CASCADE`, database
+reset, direct migration-table SQL, secret retrieval, or a replacement function.
+
+### 7.5 Post-rollback evidence
+
+The orchestrator records exact commands and non-sensitive outputs with mode
+`0600`. Pass requires:
+
+- no `ssmm-runtime` deployment;
+- no user-configured secret names;
+- no table-stat rows;
+- no `ssmm_spike1` schema, relations, or routines;
+- schema SHA-256
+  `862613c1072315c8c500084b9835ead6e45979c4e9e6abdff6be4b7174df3422`;
+- role SHA-256
+  `168a95a9c745af5ed4679751f90419ac9dc434240a213b03e32a06d5664c2308`;
+- dry-run order `202607260001`, `202607310001`, `202607310002`,
+  `202607310003` with no additional migration.
+
+Hash mismatch is drift requiring inspection. Do not normalize or overwrite the
+Stage 2B evidence directory.
+
+## 8. Evidence receipt boundary
+
+Record only project ref, reviewed Git commit, migration versions/history,
+function deployment ID/version, provider/model names, non-sensitive secret
+fingerprints or configuration status, bounded smoke identifiers, test/lint
+results, timestamps, drift, failures, rollback identifier, and recovery result.
 
 Redact every secret value, full authorization header, password-bearing URL, and
 human Sense content not needed for review.
+
+Rollback readiness does not ratify `verify_jwt=false`, custom shared-secret
+authentication, provider/model selection, or Shortcut credential handling.
+Those remain separate Stage 3 human review concerns.

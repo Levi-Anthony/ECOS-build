@@ -218,6 +218,12 @@ jobs:
             exit 1
           fi
 
+      - name: Prove rollback across every migration prefix and reapply
+        id: rollback_readiness
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        run: bash tests/rollback-readiness.sh
+
       - name: Stop disposable local Supabase
         if: always()
         run: supabase stop --no-backup || true
@@ -233,11 +239,13 @@ jobs:
           CONCURRENCY: ${{ steps.concurrency.outcome }}
           HTTP_AUTHORITY: ${{ steps.http_authority.outcome }}
           HTTP_CUSTODY: ${{ steps.http_custody.outcome }}
+          ROLLBACK_READINESS: ${{ steps.rollback_readiness.outcome }}
         run: |
           failed=0
           for outcome in \
             "$DENO_CHECK" "$DENO_TEST" "$LOCAL_ENV" "$SUPABASE_START" \
-            "$PGTAP" "$CONCURRENCY" "$HTTP_AUTHORITY" "$HTTP_CUSTODY"; do
+            "$PGTAP" "$CONCURRENCY" "$HTTP_AUTHORITY" "$HTTP_CUSTODY" \
+            "$ROLLBACK_READINESS"; do
             if [ "$outcome" != "success" ]; then
               failed=1
             fi
@@ -250,5 +258,6 @@ jobs:
             "pgtap=$PGTAP" \
             "concurrency=$CONCURRENCY" \
             "http_authority=$HTTP_AUTHORITY" \
-            "http_custody=$HTTP_CUSTODY"
+            "http_custody=$HTTP_CUSTODY" \
+            "rollback_readiness=$ROLLBACK_READINESS"
           exit "$failed"

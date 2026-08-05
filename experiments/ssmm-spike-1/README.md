@@ -64,6 +64,8 @@ node tests/concurrent-idempotency.mjs
 SSMM_RUNTIME_SHARED_SECRET=... node tests/http-authority-integrity.mjs
 node --env-file=/path/to/local-test.env tests/http-custody-flow.mjs
 supabase db lint --level warning
+bash tests/rollback-readiness.sh
+scripts/ssmm-stage3-rollback.sh plan
 ```
 
 The dedicated CI job `ssmm-spike-1-authority-integrity` runs the deterministic
@@ -126,3 +128,11 @@ node --env-file=/path/to/remote-test.env tests/remote-shape-handoff.mjs
 These materials are handoff aids, not deployment authority. Remote linking,
 dry-run inspection, migration, provider/model selection, client authentication,
 Shortcut installation, and field use remain governed review seams.
+
+Rollback readiness is source-controlled in the
+[remote build runbook](docs/spike-1/remote-build-runbook.md) and mapped for
+review in the
+[rollback-readiness receipt](docs/spike-1/rollback-readiness-receipt.md).
+Its remote execute mode is inert without explicit target, commit, baseline,
+rollback-ID, and evidence-directory confirmations. A green rollback rehearsal
+does not ratify custom shared-secret authentication or `verify_jwt=false`.
