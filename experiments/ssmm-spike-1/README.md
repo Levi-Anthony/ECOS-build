@@ -71,6 +71,11 @@ unit checks, pgTAP suite, different-request concurrency races, and HTTP conflict
 and read-only-restoration tests against disposable local Supabase. Local or CI
 evidence does not prove the product claim.
 
+The verified PR #19 baseline uses protocol `spike1-slice-contract-0.3`, Shape
+prompt `spike1-shape-0.3`, and Edge Function `spike1-0.4.0`. Procedure cards
+must preserve the loop revision and exact proposal identity contracts at those
+versions; older v0.2 request envelopes are not compatible.
+
 ## Future promotion seam
 
 The evidence-informed destination is one greenfield Supabase project with the
@@ -100,7 +105,24 @@ A review-complete field test still requires:
    the field.
 10. Falsifier assessment and review packet.
 
-The reserved remote project is not linked or used by this repository change.
-A test without leaving and returning during Move does not test custody of the
+The reserved remote project is not linked or used by this repository change. A
+test without leaving and returning during Move does not test custody of the
 execution gap. A test without Metabolize and residue does not test whether the
 result lands.
+
+Prepared procedure cards:
+
+- [Remote build runbook](docs/spike-1/remote-build-runbook.md)
+- [iOS Shortcut build card](docs/spike-1/ios-shortcut-build-card.md)
+
+The remote Shape-handoff test is designed to create one loop in an otherwise
+empty isolated project, persist a non-authoritative Shape proposal, prove exact
+request replay, and stop before acceptance or installation:
+
+```sh
+node --env-file=/path/to/remote-test.env tests/remote-shape-handoff.mjs
+```
+
+These materials are handoff aids, not deployment authority. Remote linking,
+dry-run inspection, migration, provider/model selection, client authentication,
+Shortcut installation, and field use remain governed review seams.
