@@ -58,3 +58,206 @@ jobs:
       - run: supabase start
       - run: supabase db reset --local
       - run: supabase test db
+
+  ssmm-spike-1-authority-integrity:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: experiments/ssmm-spike-1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.76.9
+
+      - name: Check Edge Function
+        id: deno_check
+        continue-on-error: true
+        run: deno check supabase/functions/ssmm-runtime/index.ts
+
+      - name: Run Edge Function unit tests
+        id: deno_test
+        if: always()
+        continue-on-error: true
+        run: deno test supabase/functions/ssmm-runtime --allow-env
+
+      - name: Prepare local-only test environment
+        id: local_env
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p supabase/functions
+          cat > supabase/functions/.env <<'ENV'
+          SSMM_RUNTIME_SHARED_SECRET=ci-local-runtime-secret
+          SSMM_PURPOSE_ID=ci-purpose
+          SSMM_PURPOSE_LABEL=CI purpose
+          SSMM_ORIENTATION_ID=ci-orientation
+          SSMM_ORIENTATION_LABEL=CI orientation
+          SSMM_SHAPE_ENDPOINT=http://host.docker.internal:55430/v1/chat/completions
+          SSMM_SHAPE_API_KEY=ci-unused-provider-key
+          SSMM_SHAPE_MODEL=ci-mock-model
+          ENV
+
+      - name: Stop any prior disposable Supabase state
+        id: supabase_stop_previous
+        if: always()
+        continue-on-error: true
+        run: supabase stop --no-backup || true
+
+      - name: Start disposable local Supabase
+        id: supabase_start
+        if: always()
+        continue-on-error: true
+        run: supabase start
+
+      - name: Run transactional database tests from a clean state
+        id: pgtap
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        run: |
+          supabase db reset --local
+          supabase test db
+
+      - name: Run different-request concurrency tests from a clean state
+        id: concurrency
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        run: |
+          supabase db reset --local
+          node tests/concurrent-idempotency.mjs
+
+      - name: Run HTTP authority tests from a clean state
+        id: http_authority
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -u
+          supabase db reset --local
+          supabase functions serve ssmm-runtime \
+            --env-file supabase/functions/.env \
+            --no-verify-jwt > /tmp/ssmm-authority-functions.log 2>&1 &
+          function_pid=$!
+          cleanup() { kill "$function_pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/ssmm-authority-probe.json -w '%{http_code}' \
+              -X POST http://127.0.0.1:55421/functions/v1/ssmm-runtime || true)
+            if [ "$code" = "401" ]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            cat /tmp/ssmm-authority-functions.log
+            cat /tmp/ssmm-authority-probe.json || true
+            exit 1
+          fi
+          SSMM_RUNTIME_SHARED_SECRET=ci-local-runtime-secret \
+            node tests/http-authority-integrity.mjs
+
+      - name: Run HTTP custody flow from a clean state
+        id: http_custody
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        env:
+          SSMM_RUNTIME_SHARED_SECRET: ci-local-runtime-secret
+        run: |
+          set -u
+          supabase db reset --local
+          SSMM_MOCK_SHAPE_HOST=0.0.0.0 \
+            node tests/mock-shape-provider.mjs > /tmp/ssmm-mock-shape.log 2>&1 &
+          mock_pid=$!
+          supabase functions serve ssmm-runtime \
+            --env-file supabase/functions/.env \
+            --no-verify-jwt > /tmp/ssmm-custody-functions.log 2>&1 &
+          function_pid=$!
+          cleanup() {
+            kill "$function_pid" 2>/dev/null || true
+            kill "$mock_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          mock_ready=0
+          function_ready=0
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/ssmm-mock-probe.json -w '%{http_code}' \
+              -H 'content-type: application/json' \
+              -d '{}' http://127.0.0.1:55430/v1/chat/completions || true)
+            if [ "$code" = "200" ]; then
+              mock_ready=1
+              break
+            fi
+            sleep 1
+          done
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/ssmm-custody-probe.json -w '%{http_code}' \
+              -X POST http://127.0.0.1:55421/functions/v1/ssmm-runtime || true)
+            if [ "$code" = "401" ]; then
+              function_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$mock_ready" != "1" ] || [ "$function_ready" != "1" ]; then
+            cat /tmp/ssmm-mock-shape.log
+            cat /tmp/ssmm-custody-functions.log
+            cat /tmp/ssmm-mock-probe.json || true
+            cat /tmp/ssmm-custody-probe.json || true
+            exit 1
+          fi
+          if ! node tests/http-custody-flow.mjs; then
+            cat /tmp/ssmm-mock-shape.log
+            cat /tmp/ssmm-custody-functions.log
+            exit 1
+          fi
+
+      - name: Prove rollback across every migration prefix and reapply
+        id: rollback_readiness
+        if: always() && steps.supabase_start.outcome == 'success'
+        continue-on-error: true
+        run: bash tests/rollback-readiness.sh
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+      - name: Aggregate bounded authority-integrity gate
+        if: always()
+        env:
+          DENO_CHECK: ${{ steps.deno_check.outcome }}
+          DENO_TEST: ${{ steps.deno_test.outcome }}
+          LOCAL_ENV: ${{ steps.local_env.outcome }}
+          SUPABASE_START: ${{ steps.supabase_start.outcome }}
+          PGTAP: ${{ steps.pgtap.outcome }}
+          CONCURRENCY: ${{ steps.concurrency.outcome }}
+          HTTP_AUTHORITY: ${{ steps.http_authority.outcome }}
+          HTTP_CUSTODY: ${{ steps.http_custody.outcome }}
+          ROLLBACK_READINESS: ${{ steps.rollback_readiness.outcome }}
+        run: |
+          failed=0
+          for outcome in \
+            "$DENO_CHECK" "$DENO_TEST" "$LOCAL_ENV" "$SUPABASE_START" \
+            "$PGTAP" "$CONCURRENCY" "$HTTP_AUTHORITY" "$HTTP_CUSTODY" \
+            "$ROLLBACK_READINESS"; do
+            if [ "$outcome" != "success" ]; then
+              failed=1
+            fi
+          done
+          printf '%s\n' \
+            "deno_check=$DENO_CHECK" \
+            "deno_test=$DENO_TEST" \
+            "local_env=$LOCAL_ENV" \
+            "supabase_start=$SUPABASE_START" \
+            "pgtap=$PGTAP" \
+            "concurrency=$CONCURRENCY" \
+            "http_authority=$HTTP_AUTHORITY" \
+            "http_custody=$HTTP_CUSTODY" \
+            "rollback_readiness=$ROLLBACK_READINESS"
+          exit "$failed"

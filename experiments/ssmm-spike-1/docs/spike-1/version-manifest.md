@@ -1,0 +1,34 @@
+# Spike 1 Version Manifest
+
+- Review date: `2026-07-31`
+- Linear issue: `ECO-70` (child of `ECO-61`)
+- Git branch: `codex/eco-70-ssmm-spike-1`
+- Supabase project: reserved but intentionally unlinked and unused
+- Reserved project reference: `itqjtjcsjwvzxcowhqyt`
+- Prior implementation commit: `a5d4fb4f8fcc8162bd593090db4177adfdde0728`
+- Authority-integrity implementation commit: PR head after this change set
+- Base migration: `202607260001_ssmm_spike1_runtime.sql`
+- Authority-integrity migration: `202607310001_ssmm_spike1_authority_integrity.sql`
+- Explicit creation-revision migration: `202607310002_ssmm_spike1_creation_revision.sql`
+- Edge Function: `spike1-0.4.0`
+- Protocol version: `spike1-slice-contract-0.3`
+- Prompt version: `spike1-shape-0.3`
+- Shortcut version: not implemented
+- Path-card version: `slice-contract-0.2`
+- Authority-integrity contract: `authority-integrity-v0.3`
+- First-loop mutation contract: client supplies `expected_loop_revision: 0`; persisted loop returns revision `1`
+- Existing-loop re-entry contract: expected revision may be omitted and no mutation occurs
+- Future ECB/SSMM amendment: evidence-informed, non-governing
+- Reviewer:
+- Secrets verified: no remote secrets configured
+- Clean local migration reset: required in CI
+- Deterministic request-fingerprint tests: required in CI
+- Transactional revision and idempotency tests: required in CI
+- Different-request concurrency races: required in CI
+- HTTP conflict and read-only restoration tests: required in CI
+- RLS enabled remotely: no
+- Access grants verified remotely: no
+- Remote project linked: no
+- Retry idempotency verified remotely: no
+- Real field test completed: no
+- Review packet complete: no

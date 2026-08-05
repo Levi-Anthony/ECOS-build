@@ -1,0 +1,8 @@
+.DS_Store
+.env
+.env.local
+.supabase/
+supabase/.branches/
+supabase/.temp/
+evidence/spike-1/transcripts/private/
+evidence/spike-1/screenshots/private/
